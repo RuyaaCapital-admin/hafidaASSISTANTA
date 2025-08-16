@@ -14,7 +14,7 @@ import { useToast } from "@/hooks/use-toast"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { SymbolSearch } from "@/components/symbol-search"
 import { markLevels } from "@/lib/mark-levels"
-import { TIMEFRAMES, isIntraday, getPollInterval, isMarketHours } from "@/lib/timeframe"
+import { TIMEFRAMES } from "@/lib/timeframe"
 
 interface LevelsData {
   upper1: number
@@ -58,6 +58,7 @@ export function ChartContainer() {
   const [autoMarkLoading, setAutoMarkLoading] = useState(false)
   const [isDarkMode, setIsDarkMode] = useState(false)
   const [currentPrice, setCurrentPrice] = useState<number>(0)
+  const [displayName, setDisplayName] = useState<string>("AAPL.US")
 
   const [levelGroups, setLevelGroups] = useState<Record<string, LevelGroup>>({})
   const [showZones, setShowZones] = useState(false)
@@ -77,6 +78,11 @@ export function ChartContainer() {
   const [pollController, setPollController] = useState<AbortController | null>(null)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
   const [isLive, setIsLive] = useState(false)
+
+  const [isLoading, setIsLoading] = useState(false)
+  const [lastLoadedSymbol, setLastLoadedSymbol] = useState<string>("")
+  const [lastLoadedInterval, setLastLoadedInterval] = useState<string>("")
+  const loadingTimeoutRef = useRef<NodeJS.Timeout>()
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -175,101 +181,92 @@ export function ChartContainer() {
   const applyTheme = useCallback((theme: string) => {
     if (!chartRef.current?.chart) return
 
-    const colors = getChartColors(theme === "dark")
+    const isDark = theme === "dark"
+    const backgroundColor = isDark ? "#0f172a" : "#ffffff"
+    const textColor = isDark ? "#f1f5f9" : "#0f172a"
+    const gridColor = isDark ? "rgba(241,245,249,0.1)" : "rgba(15,23,42,0.1)"
 
     chartRef.current.chart.applyOptions({
       layout: {
-        background: { color: theme === "dark" ? "#0b0f1a" : "#ffffff" },
-        textColor: theme === "dark" ? "#E7EAF3" : "#111827",
+        background: { color: backgroundColor },
+        textColor: textColor,
       },
       rightPriceScale: {
         borderVisible: false,
-        textColor: theme === "dark" ? "#E7EAF3" : "#111827",
+        textColor: textColor,
         scaleMargins: { top: 0.1, bottom: 0.1 },
       },
       leftPriceScale: { borderVisible: false },
       timeScale: {
         borderVisible: false,
-        textColor: theme === "dark" ? "#E7EAF3" : "#111827",
+        textColor: textColor,
       },
       grid: {
-        vertLines: { color: theme === "dark" ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.06)" },
-        horzLines: { color: theme === "dark" ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.06)" },
+        vertLines: { color: "rgba(0,0,0,0)" },
+        horzLines: { color: gridColor },
       },
       crosshair: {
-        vertLine: { color: theme === "dark" ? "#5563ff" : "#3741ff" },
-        horzLine: { color: theme === "dark" ? "#5563ff" : "#3741ff" },
+        vertLine: { color: isDark ? "#6366f1" : "#4f46e5" },
+        horzLine: { color: isDark ? "#6366f1" : "#4f46e5" },
       },
     })
 
-    // Force sizing tick
-    chartRef.current.chart.timeScale().fitContent()
-    chartRef.current.chart.resize(
-      chartContainerRef.current?.clientWidth || 800,
-      chartContainerRef.current?.clientHeight || 500,
-    )
+    setTimeout(() => {
+      if (chartRef.current?.chart) {
+        chartRef.current.chart.timeScale().fitContent()
+      }
+    }, 50)
   }, [])
 
   const loadSeries = useCallback(
     async (newSymbol: string, newResolution: string) => {
+      // Prevent duplicate calls for same symbol/resolution
+      if (isLoading || (newSymbol === lastLoadedSymbol && newResolution === lastLoadedInterval)) {
+        return
+      }
+
+      // Clear any pending timeout
+      if (loadingTimeoutRef.current) {
+        clearTimeout(loadingTimeoutRef.current)
+      }
+
+      setIsLoading(true)
+      setLastLoadedSymbol(newSymbol)
+      setLastLoadedInterval(newResolution)
+
       try {
-        // Cancel existing poll
-        if (pollController) {
-          pollController.abort()
-          setPollController(null)
-        }
-
-        setIsLive(false)
-
-        // Fetch initial data
         const response = await fetch(`/api/chart-data?symbol=${newSymbol}&resolution=${newResolution}`)
-        if (!response.ok) throw new Error(`Failed to fetch data: ${response.status}`)
+        if (!response.ok) {
+          throw new Error(`Failed to fetch data: ${response.status}`)
+        }
 
         const data = await response.json()
-        if (!data.candles || data.candles.length === 0) {
-          throw new Error("No chart data available")
-        }
+        if (data && data.candles && Array.isArray(data.candles) && data.candles.length > 0) {
+          if (chartRef.current?.candlestickSeries) {
+            chartRef.current.candlestickSeries.setData(data.candles)
 
-        // Update chart series
-        if (chartRef.current?.candlestickSeries) {
-          chartRef.current.candlestickSeries.setData(data.candles)
-
-          // Update header with current price
-          if (data.last) {
-            setCurrentPrice(data.last)
-            setLastUpdated(new Date())
-          }
-
-          // Fit content and emit data-ready event
-          chartRef.current.chart.timeScale().fitContent()
-          requestAnimationFrame(() => {
-            if (chartRef.current?.chart && chartContainerRef.current) {
-              chartRef.current.chart.resize(
-                chartContainerRef.current.clientWidth,
-                chartContainerRef.current.clientHeight,
-              )
+            // Update current price if available
+            if (data.last) {
+              setCurrentPrice(data.last)
             }
-          })
-        }
 
-        // Start polling for live updates
-        const newController = new AbortController()
-        setPollController(newController)
-
-        const pollInterval = getPollInterval(newResolution)
-        const isMarketOpen = isMarketHours(newSymbol)
-        const shouldPoll = isIntraday(newResolution) && isMarketOpen
-
-        if (shouldPoll) {
-          setIsLive(true)
-          startPolling(newSymbol, newResolution, newController, pollInterval)
+            // Auto-fit content after data load
+            loadingTimeoutRef.current = setTimeout(() => {
+              if (chartRef.current?.chart) {
+                chartRef.current.chart.timeScale().fitContent()
+              }
+            }, 100)
+          }
+        } else {
+          throw new Error("No chart data available")
         }
       } catch (error) {
         console.error("[v0] Error loading series:", error)
-        throw error
+      } finally {
+        setIsLoading(false)
       }
     },
-    [pollController],
+    [isLoading, lastLoadedSymbol, lastLoadedInterval],
   )
 
   const startPolling = useCallback(
@@ -324,12 +321,11 @@ export function ChartContainer() {
           const containerWidth = chartContainerRef.current.clientWidth || 800
           const containerHeight = Math.max(500, window.innerHeight * 0.7)
 
-          // Detect theme immediately on initialization
-          const currentTheme = isDarkMode ? "dark" : "light"
-          const backgroundColor = currentTheme === "dark" ? "#0b0f1a" : "#ffffff"
-          const textColor = currentTheme === "dark" ? "#E7EAF3" : "#111827"
-          const gridColor = currentTheme === "dark" ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.06)"
-          const borderColor = currentTheme === "dark" ? "#27272a" : "#e5e7eb"
+          const isDark = document.documentElement.classList.contains("dark")
+          const backgroundColor = isDark ? "#0f172a" : "#ffffff"
+          const textColor = isDark ? "#f1f5f9" : "#0f172a"
+          const gridColor = isDark ? "rgba(241,245,249,0.1)" : "rgba(15,23,42,0.1)"
+          const borderColor = isDark ? "#334155" : "#e2e8f0"
 
           const chart = createChart(chartContainerRef.current, {
             width: containerWidth,
@@ -339,13 +335,13 @@ export function ChartContainer() {
               textColor: textColor,
             },
             grid: {
-              vertLines: { color: "rgba(42,46,57,0)" },
+              vertLines: { color: "rgba(0,0,0,0)" },
               horzLines: { color: gridColor },
             },
             crosshair: {
               mode: 1,
-              vertLine: { color: currentTheme === "dark" ? "#5563ff" : "#3741ff" },
-              horzLine: { color: currentTheme === "dark" ? "#5563ff" : "#3741ff" },
+              vertLine: { color: isDark ? "#6366f1" : "#4f46e5" },
+              horzLine: { color: isDark ? "#6366f1" : "#4f46e5" },
             },
             rightPriceScale: {
               borderColor: borderColor,
@@ -373,7 +369,6 @@ export function ChartContainer() {
 
           chartRef.current = { chart, candlestickSeries, LineSeries }
 
-          // Load initial data
           loadSeries(symbol, interval)
 
           const handleResize = () => {
@@ -400,7 +395,7 @@ export function ChartContainer() {
         chartRef.current = null
       }
     }
-  }, [])
+  }, []) // Remove dependencies to prevent re-initialization
 
   useEffect(() => {
     applyTheme(isDarkMode ? "dark" : "light")
@@ -674,12 +669,23 @@ export function ChartContainer() {
     fetchSnapshots()
   }, [symbol])
 
-  const handleSymbolSelect = (selectedSymbol: string) => {
-    const cleanedSymbol = validateSymbol(selectedSymbol)
-    setSymbol(cleanedSymbol)
-    loadSeries(cleanedSymbol, interval)
-    fetchSnapshots()
-  }
+  const handleSymbolSelect = useCallback(
+    (newSymbol: string, displayName?: string) => {
+      if (newSymbol === symbol) return // Prevent duplicate selection
+
+      setSymbol(newSymbol)
+      setDisplayName(displayName || newSymbol)
+
+      if (loadingTimeoutRef.current) {
+        clearTimeout(loadingTimeoutRef.current)
+      }
+
+      loadingTimeoutRef.current = setTimeout(() => {
+        loadSeries(newSymbol, interval)
+      }, 100)
+    },
+    [symbol, interval, loadSeries],
+  )
 
   const handleAutoMarkLevels = async (timeframe: "daily" | "weekly" | "monthly") => {
     if (!symbol.trim()) {
@@ -780,10 +786,22 @@ export function ChartContainer() {
     return
   }
 
-  const handleTimeframeChange = (newTimeframe: string) => {
-    setTimeframe(newTimeframe)
-    loadSeries(symbol, newTimeframe)
-  }
+  const handleTimeframeChange = useCallback(
+    (newTimeframe: string) => {
+      if (newTimeframe === interval) return // Prevent duplicate selection
+
+      setInterval(newTimeframe)
+
+      if (loadingTimeoutRef.current) {
+        clearTimeout(loadingTimeoutRef.current)
+      }
+
+      loadingTimeoutRef.current = setTimeout(() => {
+        loadSeries(symbol, newTimeframe)
+      }, 100)
+    },
+    [symbol, interval, loadSeries],
+  )
 
   useEffect(() => {
     const handleAgentAction = (event: CustomEvent) => {
@@ -851,7 +869,7 @@ export function ChartContainer() {
         <CardContent className="pt-6">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-2xl font-bold">{symbol}</h2>
+              <h2 className="text-2xl font-bold">{displayName}</h2>
               <p className="text-sm text-muted-foreground">
                 {chartData.length > 0 && (
                   <>
@@ -917,12 +935,12 @@ export function ChartContainer() {
             <div className="flex items-end">
               <Button
                 onClick={() => loadSeries(symbol, interval)}
-                disabled={loading}
+                disabled={isLoading}
                 variant="outline"
                 size="sm"
                 className="w-full sm:w-auto"
               >
-                {loading ? "Loading..." : "Refresh"}
+                {isLoading ? "Loading..." : "Refresh"}
               </Button>
             </div>
           </div>
@@ -972,7 +990,7 @@ export function ChartContainer() {
           <div className="absolute top-2 left-4 right-4 z-20 bg-background/95 backdrop-blur-sm rounded-lg p-3 border shadow-sm">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <h3 className="text-lg font-semibold">{symbol}</h3>
+                <h3 className="text-lg font-semibold">{displayName}</h3>
                 {chartData.length > 0 && (
                   <div className="text-sm text-muted-foreground">
                     ${chartData[chartData.length - 1]?.close?.toFixed(2) || "N/A"}
@@ -991,16 +1009,18 @@ export function ChartContainer() {
               {/* Left: Timeframe selector and reset */}
               <div className="flex items-center gap-2 flex-wrap">
                 <div className="flex items-center gap-1">
-                  {TIMEFRAMES.map((option) => (
+                  {TIMEFRAMES.filter(
+                    (tf, index, arr) => arr.findIndex((t) => t.value === tf.value) === index, // Remove duplicates
+                  ).map((timeframe) => (
                     <Button
-                      key={option.value}
-                      variant={timeframe === option.value ? "default" : "outline"}
+                      key={timeframe.value}
+                      variant={interval === timeframe.value ? "default" : "outline"}
                       size="sm"
-                      onClick={() => handleTimeframeChange(option.value)}
-                      className="h-7 px-2 text-xs"
+                      onClick={() => handleTimeframeChange(timeframe.value)}
+                      disabled={isLoading}
+                      className="text-xs px-2 py-1 h-7"
                     >
-                      {option.label}
-                      {option.realTime && <div className="w-1 h-1 bg-green-500 rounded-full ml-1" />}
+                      {timeframe.label}
                     </Button>
                   ))}
                 </div>

@@ -32,6 +32,7 @@ export function SymbolSearch({ onSymbolSelect, placeholder = "Search symbols..."
   const [showResults, setShowResults] = useState(false)
   const searchRef = useRef<HTMLDivElement>(null)
   const { toast } = useToast()
+  const [lastQuery, setLastQuery] = useState("")
 
   useEffect(() => {
     const searchSymbols = async () => {
@@ -40,6 +41,9 @@ export function SymbolSearch({ onSymbolSelect, placeholder = "Search symbols..."
         setAliasSuggestion(null)
         return
       }
+
+      if (query === lastQuery) return
+      setLastQuery(query)
 
       setIsLoading(true)
       try {
@@ -81,9 +85,9 @@ export function SymbolSearch({ onSymbolSelect, placeholder = "Search symbols..."
       }
     }
 
-    const debounceTimer = setTimeout(searchSymbols, 250)
+    const debounceTimer = setTimeout(searchSymbols, 500)
     return () => clearTimeout(debounceTimer)
-  }, [query, toast])
+  }, [query, toast]) // Remove lastQuery from dependencies to prevent loops
 
   const getDisplayName = (input: string, providerSymbol: string): string => {
     const inputLower = input.toLowerCase()
