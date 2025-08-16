@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react"
 import { Search } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { useToast } from "@/hooks/use-toast"
+import { validateSymbol } from "@/lib/symbolMap"
 
 interface SearchResult {
   display: string
@@ -96,12 +97,6 @@ export function SymbolSearch({ onSymbolSelect, placeholder = "Search symbols..."
     return providerSymbol
   }
 
-  const validateSymbol = (symbol: string): string => {
-    // Implement symbol validation logic here
-    // For example, you can check for duplicates or other conditions
-    return symbol.trim().toUpperCase() // Example validation: trim and convert to uppercase
-  }
-
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (searchRef.current && !searchRef.current.contains(event.target as Node)) {
@@ -118,6 +113,7 @@ export function SymbolSearch({ onSymbolSelect, placeholder = "Search symbols..."
     setQuery(finalDisplayName)
     setShowResults(false)
     const cleanedSymbol = validateSymbol(providerSymbol)
+    console.log("[v0] Symbol selected:", providerSymbol, "-> cleaned:", cleanedSymbol)
     onSymbolSelect(cleanedSymbol, finalDisplayName)
   }
 

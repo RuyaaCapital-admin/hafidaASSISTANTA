@@ -27,8 +27,16 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Missing required parameter: symbol" }, { status: 400 })
     }
 
+    const cleanSymbol = symbol
+      .replace(/(-USD)?(-USD)+(\.CC)$/i, "-USD.CC")
+      .replace(/(\.US)+(\.US)+$/i, ".US")
+      .replace(/(\.FOREX)+(\.FOREX)+$/i, ".FOREX")
+      .toUpperCase()
+
+    console.log("[v0] Processing symbol:", symbol, "-> cleaned:", cleanSymbol)
+
     // Check cache first
-    const cacheKey = `${symbol}-${from}-${to}-${interval}`
+    const cacheKey = `${cleanSymbol}-${from}-${to}-${interval}`
     const cached = cache.get(cacheKey)
     if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
       return NextResponse.json(cached.data)
@@ -42,18 +50,22 @@ export async function GET(request: NextRequest) {
     let url: string
     let isAggregated = false
 
+    const isForex = cleanSymbol.endsWith(".FOREX")
+    const isCrypto = cleanSymbol.endsWith(".CC")
+    const isStock = cleanSymbol.endsWith(".US") || (!isForex && !isCrypto)
+
     if (interval === "weekly" || interval === "monthly") {
       // For weekly/monthly, fetch daily data over a longer period
-      const daysBack = interval === "weekly" ? 90 : 365 // 3 months for weekly, 1 year for monthly
+      const daysBack = interval === "weekly" ? 90 : 365
       const fromParam = from || new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000).toISOString().split("T")[0]
       const toParam = to || new Date().toISOString().split("T")[0]
-      url = `https://eodhd.com/api/eod/${symbol}?from=${fromParam}&to=${toParam}&api_token=${apiKey}&fmt=json`
+      url = `https://eodhd.com/api/eod/${cleanSymbol}?from=${fromParam}&to=${toParam}&api_token=${apiKey}&fmt=json`
       isAggregated = true
     } else if (interval === "daily") {
       // Daily data - use EOD endpoint
       const fromParam = from || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0]
       const toParam = to || new Date().toISOString().split("T")[0]
-      url = `https://eodhd.com/api/eod/${symbol}?from=${fromParam}&to=${toParam}&api_token=${apiKey}&fmt=json`
+      url = `https://eodhd.com/api/eod/${cleanSymbol}?from=${fromParam}&to=${toParam}&api_token=${apiKey}&fmt=json`
     } else {
       // Intraday data - use intraday endpoint with proper interval mapping
       const intervalMap: Record<string, string> = {
@@ -63,7 +75,7 @@ export async function GET(request: NextRequest) {
         "1h": "1h",
       }
       const mappedInterval = intervalMap[interval] || "5m"
-      url = `https://eodhd.com/api/intraday/${symbol}?interval=${mappedInterval}&api_token=${apiKey}&fmt=json`
+      url = `https://eodhd.com/api/intraday/${cleanSymbol}?interval=${mappedInterval}&api_token=${apiKey}&fmt=json`
     }
 
     console.log("[v0] Fetching from EODHD:", url.replace(apiKey, "***"))
@@ -72,7 +84,7 @@ export async function GET(request: NextRequest) {
 
     if (!response.ok) {
       if (response.status === 404) {
-        return NextResponse.json({ error: `Symbol ${symbol} not found` }, { status: 404 })
+        return NextResponse.json({ error: `Symbol ${cleanSymbol} not found` }, { status: 404 })
       }
       throw new Error(`EODHD API error: ${response.status} ${response.statusText}`)
     }
@@ -80,7 +92,7 @@ export async function GET(request: NextRequest) {
     const data: EODHDCandle[] = await response.json()
 
     if (!Array.isArray(data) || data.length === 0) {
-      return NextResponse.json({ error: `No data available for ${symbol}` }, { status: 404 })
+      return NextResponse.json({ error: `No data available for ${cleanSymbol}` }, { status: 404 })
     }
 
     let processedData = data
