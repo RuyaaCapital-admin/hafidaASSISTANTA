@@ -206,6 +206,7 @@ export function ChartContainer() {
           })
 
           chartRef.current = { chart, candlestickSeries, LineSeries }
+
           fetchChartData()
 
           const handleResize = () => {
@@ -534,6 +535,18 @@ export function ChartContainer() {
         params.append("to", date)
       }
 
+      const cacheKey = `chart-${symbol}-${interval}-${date}`
+      const cachedData = getCachedData(cacheKey)
+
+      if (cachedData) {
+        setChartData(cachedData)
+        if (chartRef.current?.candlestickSeries) {
+          chartRef.current.candlestickSeries.setData(cachedData)
+        }
+        toast({ title: "Chart Updated", description: `Loaded ${cachedData.length} data points for ${symbol} (cached)` })
+        return
+      }
+
       const response = await fetch(`/api/chart-data?${params}`)
       if (!response.ok) {
         const errorData = await response.json()
@@ -544,6 +557,8 @@ export function ChartContainer() {
       if (!data || data.length === 0) {
         throw new Error(`No chart data available for ${symbol}`)
       }
+
+      setCachedData(cacheKey, data)
 
       setChartData(data)
       if (chartRef.current?.candlestickSeries) {
@@ -927,4 +942,30 @@ function generateSampleData() {
   }
 
   return data
+}
+
+interface CacheEntry {
+  data: any
+  timestamp: number
+  expiry: number
+}
+
+const apiCache = new Map<string, CacheEntry>()
+const CACHE_DURATION = 15 * 60 * 1000 // 15 minutes
+
+const getCachedData = (key: string) => {
+  const entry = apiCache.get(key)
+  if (entry && Date.now() < entry.expiry) {
+    return entry.data
+  }
+  apiCache.delete(key)
+  return null
+}
+
+const setCachedData = (key: string, data: any) => {
+  apiCache.set(key, {
+    data,
+    timestamp: Date.now(),
+    expiry: Date.now() + CACHE_DURATION,
+  })
 }

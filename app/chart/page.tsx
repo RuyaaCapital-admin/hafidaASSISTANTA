@@ -18,6 +18,18 @@ const ChartContainer = dynamic(
   },
 )
 
+const AgentChat = dynamic(() => import("@/components/agent-chat").then((mod) => ({ default: mod.AgentChat })), {
+  ssr: false,
+  loading: () => (
+    <div className="flex items-center justify-center h-64 border rounded-lg">
+      <div className="text-center space-y-2">
+        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary mx-auto"></div>
+        <p className="text-sm text-muted-foreground">Loading chat...</p>
+      </div>
+    </div>
+  ),
+})
+
 export default function ChartPage() {
   return (
     <div className="min-h-screen bg-background">
@@ -30,7 +42,18 @@ export default function ChartPage() {
               Search and visualize stocks, forex, and crypto with support and resistance levels using ±1σ and ±2σ bands
             </p>
           </div>
-          <ChartContainer />
+
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+            {/* Chart takes 2/3 width on large screens */}
+            <div className="xl:col-span-2">
+              <ChartContainer />
+            </div>
+
+            {/* AI Chat takes 1/3 width on large screens, full width on mobile */}
+            <div className="xl:col-span-1">
+              <AgentChat />
+            </div>
+          </div>
         </div>
       </main>
     </div>

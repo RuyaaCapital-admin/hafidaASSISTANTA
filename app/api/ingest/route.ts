@@ -8,14 +8,153 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 })
 
+function detectChartInstructions(message: string): { hasInstructions: boolean; symbols: string[]; action?: string } {
+  const lowerMessage = message.toLowerCase()
+
+  // Common chart/levels keywords
+  const chartKeywords = ["chart", "levels", "mark", "analyze", "em", "expected move", "sigma"]
+  const hasInstructions = chartKeywords.some((keyword) => lowerMessage.includes(keyword))
+
+  // Extract potential symbols (simple pattern matching)
+  const symbolPatterns = [
+    /\b([A-Z]{1,5})\b/g, // Basic ticker pattern
+    /\b(btc|bitcoin)\b/gi,
+    /\b(eth|ethereum)\b/gi,
+    /\b(aapl|apple)\b/gi,
+    /\b(tsla|tesla)\b/gi,
+    /\b(nvda|nvidia)\b/gi,
+    /\b(msft|microsoft)\b/gi,
+    /\b(googl|google)\b/gi,
+    /\b(amzn|amazon)\b/gi,
+    /\b(meta|facebook)\b/gi,
+    /\b(spx|spy|sp500)\b/gi,
+    /\b(qqq|nasdaq)\b/gi,
+  ]
+
+  const symbols: string[] = []
+  symbolPatterns.forEach((pattern) => {
+    const matches = message.match(pattern)
+    if (matches) {
+      matches.forEach((match) => {
+        const symbol = match.toUpperCase()
+        if (!symbols.includes(symbol) && symbol.length <= 5) {
+          symbols.push(symbol)
+        }
+      })
+    }
+  })
+
+  // Determine action
+  let action: string | undefined
+  if (lowerMessage.includes("mark") || lowerMessage.includes("levels")) {
+    action = "mark_levels"
+  } else if (lowerMessage.includes("analyze") || lowerMessage.includes("chart")) {
+    action = "analyze_chart"
+  }
+
+  return { hasInstructions, symbols, action }
+}
+
+async function generateChatResponse(message: string): Promise<string> {
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      max_tokens: 500,
+      temperature: 0.7,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are Hafid Assistanta, a helpful trading assistant. You help users analyze charts, mark trading levels, and discuss market data. Keep responses concise and friendly. If users ask about specific tickers or charts, encourage them to be more specific about what they want to analyze.",
+        },
+        {
+          role: "user",
+          content: message,
+        },
+      ],
+    })
+
+    return (
+      response.choices[0]?.message?.content ||
+      "I'm here to help with your trading analysis. What would you like to explore?"
+    )
+  } catch (error) {
+    console.error("Error generating chat response:", error)
+    return "I'm here to help! You can ask me to analyze charts, mark levels, or upload trading data files."
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData()
     const file = formData.get("file") as File
     const message = formData.get("message") as string
 
+    if (!file && message) {
+      const chartInstructions = detectChartInstructions(message)
+
+      if (chartInstructions.hasInstructions) {
+        // Handle chart/levels function calls
+        if (chartInstructions.symbols.length > 0 && chartInstructions.action === "mark_levels") {
+          try {
+            const firstSymbol = chartInstructions.symbols[0]
+            const levelsResult = await markLevels(firstSymbol, "daily")
+
+            return NextResponse.json({
+              type: "function",
+              message: `Marked levels for ${firstSymbol}. ${levelsResult.success ? "Levels updated successfully!" : "Note: Levels drawn on chart but not saved to database."}`,
+              symbols: chartInstructions.symbols,
+              levels: levelsResult.success ? ["Levels marked on chart"] : [],
+              error: levelsResult.success ? undefined : "Database not set up - levels shown on chart only",
+            })
+          } catch (error) {
+            return NextResponse.json({
+              type: "function",
+              message: `I can show levels for ${chartInstructions.symbols[0]} on the chart, but they won't be saved without database setup.`,
+              symbols: chartInstructions.symbols,
+              levels: [],
+              error: "Database not configured",
+            })
+          }
+        } else {
+          // General chart analysis request
+          const chatResponse = await generateChatResponse(message)
+          return NextResponse.json({
+            type: "function",
+            message:
+              chatResponse +
+              (chartInstructions.symbols.length > 0
+                ? ` I see you mentioned ${chartInstructions.symbols.join(", ")}. Would you like me to mark levels for any of these?`
+                : ""),
+            symbols: chartInstructions.symbols,
+            levels: [],
+            error: undefined,
+          })
+        }
+      } else {
+        // Pure conversational response
+        const chatResponse = await generateChatResponse(message)
+        return NextResponse.json({
+          type: "chat",
+          message: chatResponse,
+          symbols: [],
+          levels: [],
+          error: undefined,
+        })
+      }
+    }
+
     if (!file && !message) {
-      return NextResponse.json({ error: "No file or message provided" }, { status: 400 })
+      return NextResponse.json(
+        {
+          type: "chat",
+          message: "Please send a message or upload a file for me to analyze.",
+          symbols: [],
+          levels: [],
+          error: "No input provided",
+        },
+        { status: 400 },
+      )
     }
 
     let content: any[] = []
@@ -94,27 +233,26 @@ export async function POST(request: NextRequest) {
           console.log(`[v0] Could not refresh levels for ${firstSymbol}: ${levelsResult.error}`)
         }
       } catch (error) {
-        // Don't let database errors crash the ingest process
         console.log(`[v0] Levels refresh skipped (database not set up): ${(error as Error).message}`)
       }
     }
 
     return NextResponse.json({
-      inserted: content.length,
-      updated: 0,
-      failed: 0,
+      type: "function",
+      message: `Successfully processed ${file?.name || "your data"}! Found ${symbols.length} symbols: ${symbols.join(", ")}. You can view the levels in the Chart section.`,
       symbols: symbols,
-      errors: symbols.length === 0 ? ["No valid symbols found in the data"] : undefined,
+      levels: content.map((item: any) => `${item.symbol}: ${item.close || "N/A"}`),
+      error: symbols.length === 0 ? "No valid symbols found in the data" : undefined,
     })
   } catch (error) {
     console.error("Error processing request:", error)
     return NextResponse.json(
       {
-        inserted: 0,
-        updated: 0,
-        failed: 1,
+        type: "chat",
+        message: "Sorry, I encountered an error processing your request. Please try again.",
         symbols: [],
-        errors: ["Internal server error: " + (error as Error).message],
+        levels: [],
+        error: (error as Error).message,
       },
       { status: 500 },
     )

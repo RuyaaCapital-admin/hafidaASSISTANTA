@@ -1,13 +1,10 @@
 "use client"
 
 import type React from "react"
-
-import { useState, useRef } from "react"
+import { useState, useRef, useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
-import { Label } from "@/components/ui/label"
 import { Upload, Send, ImageIcon, FileText, Loader2 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
@@ -18,12 +15,38 @@ interface Message {
   timestamp: Date
 }
 
-interface IngestResult {
-  inserted: number
-  updated: number
-  failed: number
-  symbols: string[]
-  errors?: string[]
+interface AgentResponse {
+  type: "chat" | "function"
+  message: string
+  symbols?: string[]
+  levels?: string[]
+  error?: string
+}
+
+interface CacheEntry {
+  data: any
+  timestamp: number
+  expiry: number
+}
+
+const apiCache = new Map<string, CacheEntry>()
+const CACHE_DURATION = 15 * 60 * 1000 // 15 minutes
+
+const getCachedData = (key: string) => {
+  const entry = apiCache.get(key)
+  if (entry && Date.now() < entry.expiry) {
+    return entry.data
+  }
+  apiCache.delete(key)
+  return null
+}
+
+const setCachedData = (key: string, data: any) => {
+  apiCache.set(key, {
+    data,
+    timestamp: Date.now(),
+    expiry: Date.now() + CACHE_DURATION,
+  })
 }
 
 export function AgentChat() {
@@ -32,7 +55,7 @@ export function AgentChat() {
       id: "1",
       type: "assistant",
       content:
-        "Hello! I'm Hafid Assistanta. I can help you analyze weekly levels sheets. Upload an image or CSV file, or paste your data, and I'll extract the trading levels for you.",
+        "Hello! I'm Hafid Assistanta. I can help you analyze charts, mark trading levels, or just chat about markets. Try saying 'hi', 'analyze AAPL chart', 'mark BTC levels', or upload a trading data file!",
       timestamp: new Date(),
     },
   ])
@@ -40,7 +63,13 @@ export function AgentChat() {
   const [file, setFile] = useState<File | null>(null)
   const [loading, setLoading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const messagesEndRef = useRef<HTMLDivElement>(null)
   const { toast } = useToast()
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+  }, [messages])
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0]
@@ -50,6 +79,13 @@ export function AgentChat() {
         title: "File selected",
         description: `${selectedFile.name} (${(selectedFile.size / 1024).toFixed(1)} KB)`,
       })
+    }
+  }
+
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault()
+      handleSubmit(e as any)
     }
   }
 
@@ -68,40 +104,53 @@ export function AgentChat() {
     setLoading(true)
 
     try {
-      const formData = new FormData()
-      if (file) {
-        formData.append("file", file)
-      }
-      if (input.trim()) {
-        formData.append("message", input)
-      }
+      const cacheKey = `ingest-${input}-${file?.name || "no-file"}`
+      let result = getCachedData(cacheKey)
 
-      const response = await fetch("/api/ingest", {
-        method: "POST",
-        body: formData,
-      })
+      if (!result) {
+        const formData = new FormData()
+        if (file) {
+          formData.append("file", file)
+        }
+        if (input.trim()) {
+          formData.append("message", input)
+        }
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
-      }
+        const response = await fetch("/api/ingest", {
+          method: "POST",
+          body: formData,
+        })
 
-      const result: IngestResult = await response.json()
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`)
+        }
 
-      let responseContent = `✅ Processing complete!\n\n`
-      responseContent += `📊 **Results:**\n`
-      responseContent += `• Inserted: ${result.inserted} rows\n`
-      responseContent += `• Updated: ${result.updated} rows\n`
-      responseContent += `• Failed: ${result.failed} rows\n\n`
-
-      if (result.symbols.length > 0) {
-        responseContent += `🎯 **Symbols processed:** ${result.symbols.join(", ")}\n\n`
+        result = await response.json()
+        setCachedData(cacheKey, result)
       }
 
-      if (result.errors && result.errors.length > 0) {
-        responseContent += `⚠️ **Errors:**\n${result.errors.join("\n")}`
+      let responseContent = result.message
+
+      if (result.type === "function" && result.symbols && result.symbols.length > 0) {
+        responseContent += `\n\n🎯 **Symbols:** ${result.symbols.join(", ")}`
       }
 
-      responseContent += `\n\nYou can now view these levels in the [Chart](/chart) section.`
+      if (result.levels && result.levels.length > 0) {
+        const displayLevels = result.levels.slice(0, 50)
+        responseContent += `\n\n📊 **Levels:** ${displayLevels.slice(0, 3).join(", ")}${result.levels.length > 3 ? `... (${result.levels.length} total)` : ""}`
+
+        if (result.levels.length > 50) {
+          responseContent += `\n\n*Showing first 50 of ${result.levels.length} levels*`
+        }
+      }
+
+      if (result.error) {
+        responseContent += `\n\n⚠️ **Note:** ${result.error}`
+      }
+
+      if (result.type === "function" && result.symbols && result.symbols.length > 0) {
+        responseContent += `\n\n*Chart updated with live data*`
+      }
 
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
@@ -112,18 +161,26 @@ export function AgentChat() {
 
       setMessages((prev) => [...prev, assistantMessage])
 
-      toast({
-        title: "Analysis complete",
-        description: `Processed ${result.symbols.length} symbols successfully`,
-      })
+      if (result.type === "function") {
+        toast({
+          title: result.symbols && result.symbols.length > 0 ? "Function executed" : "Analysis complete",
+          description:
+            result.symbols && result.symbols.length > 0
+              ? `Processed ${result.symbols.length} symbols`
+              : "Response generated",
+        })
+      } else {
+        toast({
+          title: "Response ready",
+          description: "Chat message generated",
+        })
+      }
     } catch (error) {
-      console.error("Error processing request:", error)
-
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
         type: "assistant",
         content:
-          "❌ Sorry, there was an error processing your request. Please try again or check that your file format is supported.",
+          "❌ Sorry, there was an error processing your request. Please try again or check that your input is valid.",
         timestamp: new Date(),
       }
 
@@ -141,22 +198,22 @@ export function AgentChat() {
       if (fileInputRef.current) {
         fileInputRef.current.value = ""
       }
+      setTimeout(() => inputRef.current?.focus(), 100)
     }
   }
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
-      {/* Chat Messages */}
-      <Card className="min-h-[400px]">
-        <CardHeader>
-          <CardTitle>Chat with Hafid Assistanta</CardTitle>
+    <div className="space-y-4">
+      <Card className="h-[400px] xl:h-[500px]">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-lg">AI Assistant</CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="space-y-4 max-h-[500px] overflow-y-auto">
+        <CardContent className="pb-3">
+          <div className="space-y-3 h-[300px] xl:h-[400px] overflow-y-auto pr-2">
             {messages.map((message) => (
               <div key={message.id} className={`flex ${message.type === "user" ? "justify-end" : "justify-start"}`}>
                 <div
-                  className={`max-w-[80%] rounded-lg px-4 py-2 ${
+                  className={`max-w-[85%] rounded-lg px-3 py-2 ${
                     message.type === "user" ? "bg-primary text-primary-foreground" : "bg-muted"
                   }`}
                 >
@@ -167,27 +224,25 @@ export function AgentChat() {
             ))}
             {loading && (
               <div className="flex justify-start">
-                <div className="bg-muted rounded-lg px-4 py-2 flex items-center space-x-2">
+                <div className="bg-muted rounded-lg px-3 py-2 flex items-center space-x-2">
                   <Loader2 className="h-4 w-4 animate-spin" />
                   <span className="text-sm">Processing...</span>
                 </div>
               </div>
             )}
+            <div ref={messagesEndRef} />
           </div>
         </CardContent>
       </Card>
 
-      {/* Input Form */}
       <Card>
-        <CardContent className="pt-6">
-          <form onSubmit={handleSubmit} className="space-y-4">
+        <CardContent className="pt-4">
+          <form onSubmit={handleSubmit} className="space-y-3">
             {/* File Upload */}
             <div>
-              <Label htmlFor="file-upload">Upload File (Image or CSV)</Label>
-              <div className="mt-1 flex items-center space-x-2">
+              <div className="flex items-center space-x-2">
                 <Input
                   ref={fileInputRef}
-                  id="file-upload"
                   type="file"
                   accept="image/*,.csv"
                   onChange={handleFileSelect}
@@ -196,46 +251,45 @@ export function AgentChat() {
                 <Button
                   type="button"
                   variant="outline"
+                  size="sm"
                   onClick={() => fileInputRef.current?.click()}
-                  className="flex items-center space-x-2"
+                  className="flex items-center space-x-1"
                 >
-                  <Upload className="h-4 w-4" />
-                  <span>Choose File</span>
+                  <Upload className="h-3 w-3" />
+                  <span className="text-xs">File</span>
                 </Button>
                 {file && (
-                  <div className="flex items-center space-x-2 text-sm text-muted-foreground">
+                  <div className="flex items-center space-x-1 text-xs text-muted-foreground">
                     {file.type.startsWith("image/") ? (
-                      <ImageIcon className="h-4 w-4" />
+                      <ImageIcon className="h-3 w-3" />
                     ) : (
-                      <FileText className="h-4 w-4" />
+                      <FileText className="h-3 w-3" />
                     )}
-                    <span>{file.name}</span>
+                    <span className="truncate max-w-[120px]">{file.name}</span>
                   </div>
                 )}
               </div>
             </div>
 
-            {/* Text Input */}
-            <div>
-              <Label htmlFor="message">Message (optional)</Label>
-              <Textarea
-                id="message"
+            <div className="flex space-x-2">
+              <Input
+                ref={inputRef}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                placeholder="Type a message or paste data here..."
-                className="mt-1 min-h-[100px]"
+                onKeyPress={handleKeyPress}
+                placeholder="Ask about markets, upload files, or say 'hi'..."
+                className="flex-1"
               />
+              <Button
+                type="submit"
+                disabled={loading || (!input.trim() && !file)}
+                size="sm"
+                className="flex items-center space-x-1"
+              >
+                {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+                <span className="hidden sm:inline text-xs">Send</span>
+              </Button>
             </div>
-
-            {/* Submit Button */}
-            <Button
-              type="submit"
-              disabled={loading || (!input.trim() && !file)}
-              className="w-full sm:w-auto flex items-center space-x-2"
-            >
-              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-              <span>{loading ? "Processing..." : "Send"}</span>
-            </Button>
           </form>
         </CardContent>
       </Card>
