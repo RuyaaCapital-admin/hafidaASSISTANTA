@@ -6,10 +6,11 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Search, AlertCircle } from "lucide-react"
+import { Search, AlertCircle, Target } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { SymbolSearch } from "@/components/symbol-search"
+import { markLevels } from "@/lib/mark-levels"
 
 interface LevelsData {
   upper1: number
@@ -35,6 +36,7 @@ export function ChartContainer() {
   const [chartData, setChartData] = useState<ChartData[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [autoMarkLoading, setAutoMarkLoading] = useState(false)
   const chartContainerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<any>(null)
   const { toast } = useToast()
@@ -328,6 +330,47 @@ export function ChartContainer() {
     }, 100)
   }
 
+  const handleAutoMarkLevels = async () => {
+    if (!symbol.trim()) {
+      toast({
+        title: "Error",
+        description: "Please select a symbol first",
+        variant: "destructive",
+      })
+      return
+    }
+
+    setAutoMarkLoading(true)
+    try {
+      const result = await markLevels(symbol, interval)
+
+      if (result.success && result.levels) {
+        const validatedLevels = validateLevelsData(result.levels)
+        if (validatedLevels) {
+          setLevels(validatedLevels)
+          drawLevels(validatedLevels)
+          toast({
+            title: "Success",
+            description: `Levels marked for ${symbol} (${interval})`,
+          })
+        } else {
+          throw new Error("Invalid levels calculated")
+        }
+      } else {
+        throw new Error(result.message)
+      }
+    } catch (error) {
+      console.error("[v0] Error auto-marking levels:", error)
+      toast({
+        title: "Failed to mark levels",
+        description: "Check API connection and try again",
+        variant: "destructive",
+      })
+    } finally {
+      setAutoMarkLoading(false)
+    }
+  }
+
   const validateLevelsData = (data: any): LevelsData | null => {
     if (!data || typeof data !== "object") {
       return null
@@ -382,6 +425,8 @@ export function ChartContainer() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="daily">Daily</SelectItem>
+                  <SelectItem value="weekly">Weekly</SelectItem>
+                  <SelectItem value="monthly">Monthly</SelectItem>
                   <SelectItem value="5m">5 Minutes</SelectItem>
                   <SelectItem value="15m">15 Minutes</SelectItem>
                   <SelectItem value="1h">1 Hour</SelectItem>
@@ -397,6 +442,27 @@ export function ChartContainer() {
                 {loading ? "Loading..." : "Load Data"}
               </Button>
             </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="pt-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-lg font-semibold">Auto-Mark Levels</h3>
+              <p className="text-sm text-muted-foreground">
+                Automatically calculate and display ±1σ and ±2σ levels based on expected move
+              </p>
+            </div>
+            <Button
+              onClick={handleAutoMarkLevels}
+              disabled={autoMarkLoading || !symbol.trim()}
+              className="flex items-center space-x-2"
+            >
+              <Target className="h-4 w-4" />
+              <span>{autoMarkLoading ? "Calculating..." : "Auto-Mark Levels"}</span>
+            </Button>
           </div>
         </CardContent>
       </Card>

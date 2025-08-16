@@ -21,7 +21,7 @@ export async function GET(request: NextRequest) {
     const symbol = searchParams.get("symbol")
     const from = searchParams.get("from")
     const to = searchParams.get("to")
-    const interval = searchParams.get("interval") || "daily" // changed default to "daily"
+    const interval = searchParams.get("interval") || "daily"
 
     if (!symbol) {
       return NextResponse.json({ error: "Missing required parameter: symbol" }, { status: 400 })
@@ -40,8 +40,16 @@ export async function GET(request: NextRequest) {
     }
 
     let url: string
+    let isAggregated = false
 
-    if (interval === "daily") {
+    if (interval === "weekly" || interval === "monthly") {
+      // For weekly/monthly, fetch daily data over a longer period
+      const daysBack = interval === "weekly" ? 90 : 365 // 3 months for weekly, 1 year for monthly
+      const fromParam = from || new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000).toISOString().split("T")[0]
+      const toParam = to || new Date().toISOString().split("T")[0]
+      url = `https://eodhd.com/api/eod/${symbol}?from=${fromParam}&to=${toParam}&api_token=${apiKey}&fmt=json`
+      isAggregated = true
+    } else if (interval === "daily") {
       // Daily data - use EOD endpoint
       const fromParam = from || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0]
       const toParam = to || new Date().toISOString().split("T")[0]
@@ -75,10 +83,10 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: `No data available for ${symbol}` }, { status: 404 })
     }
 
-    const chartData = data
+    let processedData = data
       .map((candle) => {
         let time: number
-        if (interval === "daily") {
+        if (interval === "daily" || isAggregated) {
           // For daily data, use date string as Unix timestamp (days since epoch)
           time = Math.floor(new Date(candle.date + "T00:00:00Z").getTime() / 1000)
         } else {
@@ -93,6 +101,7 @@ export async function GET(request: NextRequest) {
           low: Number(candle.low),
           close: Number(candle.close),
           volume: Number(candle.volume || 0),
+          date: candle.date,
         }
       })
       .filter(
@@ -103,7 +112,15 @@ export async function GET(request: NextRequest) {
           !isNaN(candle.low) &&
           !isNaN(candle.close),
       )
-      .sort((a, b) => a.time - b.time) // Sort by time ascending
+      .sort((a, b) => a.time - b.time)
+
+    if (isAggregated) {
+      const aggregated = aggregateCandles(processedData, interval as "weekly" | "monthly")
+      processedData = aggregated
+    }
+
+    // Remove the date field from final output
+    const chartData = processedData.map(({ date, ...candle }) => candle)
 
     console.log("[v0] Processed chart data:", chartData.length, "candles")
 
@@ -120,5 +137,71 @@ export async function GET(request: NextRequest) {
       },
       { status: 500 },
     )
+  }
+}
+
+function aggregateCandles(dailyData: any[], interval: "weekly" | "monthly") {
+  if (dailyData.length === 0) return []
+
+  const aggregated: any[] = []
+  let currentPeriod: any[] = []
+  let currentPeriodStart: Date | null = null
+
+  for (const candle of dailyData) {
+    const candleDate = new Date(candle.date)
+
+    // Determine if this candle belongs to a new period
+    let newPeriod = false
+
+    if (interval === "weekly") {
+      // Start new week on Monday
+      const monday = new Date(candleDate)
+      monday.setDate(candleDate.getDate() - candleDate.getDay() + 1)
+      monday.setHours(0, 0, 0, 0)
+
+      if (!currentPeriodStart || monday.getTime() !== currentPeriodStart.getTime()) {
+        newPeriod = true
+        currentPeriodStart = monday
+      }
+    } else if (interval === "monthly") {
+      // Start new month on the 1st
+      const firstOfMonth = new Date(candleDate.getFullYear(), candleDate.getMonth(), 1)
+
+      if (!currentPeriodStart || firstOfMonth.getTime() !== currentPeriodStart.getTime()) {
+        newPeriod = true
+        currentPeriodStart = firstOfMonth
+      }
+    }
+
+    // If new period and we have data from previous period, aggregate it
+    if (newPeriod && currentPeriod.length > 0) {
+      aggregated.push(aggregatePeriod(currentPeriod))
+      currentPeriod = []
+    }
+
+    currentPeriod.push(candle)
+  }
+
+  // Aggregate the last period
+  if (currentPeriod.length > 0) {
+    aggregated.push(aggregatePeriod(currentPeriod))
+  }
+
+  return aggregated
+}
+
+function aggregatePeriod(candles: any[]) {
+  if (candles.length === 0) throw new Error("Cannot aggregate empty period")
+
+  const first = candles[0]
+  const last = candles[candles.length - 1]
+
+  return {
+    time: first.time, // Use the time of the first candle in the period
+    open: first.open,
+    high: Math.max(...candles.map((c) => c.high)),
+    low: Math.min(...candles.map((c) => c.low)),
+    close: last.close,
+    volume: candles.reduce((sum, c) => sum + c.volume, 0),
   }
 }
