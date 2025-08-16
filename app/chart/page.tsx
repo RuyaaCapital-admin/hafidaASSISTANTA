@@ -1,5 +1,22 @@
+"use client"
+
 import { Navigation } from "@/components/navigation"
-import { ChartContainer } from "@/components/chart-container"
+import dynamic from "next/dynamic"
+
+const ChartContainer = dynamic(
+  () => import("@/components/chart-container").then((mod) => ({ default: mod.ChartContainer })),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex items-center justify-center h-96 border rounded-lg">
+        <div className="text-center space-y-2">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
+          <p className="text-sm text-muted-foreground">Loading chart...</p>
+        </div>
+      </div>
+    ),
+  },
+)
 
 export default function ChartPage() {
   return (

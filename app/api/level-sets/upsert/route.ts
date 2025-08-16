@@ -42,6 +42,19 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: true, data: result[0] })
   } catch (error) {
+    if (error instanceof Error && error.message.includes('relation "level_sets" does not exist')) {
+      // This is an expected condition when database hasn't been set up yet
+      // Don't log as error, just return helpful response
+      return NextResponse.json(
+        {
+          error: "Database tables not initialized. Please run the migration script first.",
+          code: "TABLES_NOT_FOUND",
+        },
+        { status: 503 },
+      )
+    }
+
+    // Only log unexpected errors
     console.error("Error upserting level set:", error)
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }

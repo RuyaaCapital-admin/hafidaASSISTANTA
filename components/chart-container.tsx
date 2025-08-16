@@ -55,6 +55,7 @@ export function ChartContainer() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [autoMarkLoading, setAutoMarkLoading] = useState(false)
+  const [isDarkMode, setIsDarkMode] = useState(false)
 
   const [levelGroups, setLevelGroups] = useState<Record<string, LevelGroup>>({})
   const [showZones, setShowZones] = useState(false)
@@ -71,11 +72,28 @@ export function ChartContainer() {
   const { toast } = useToast()
 
   useEffect(() => {
+    if (typeof window !== "undefined") {
+      const checkDarkMode = () => {
+        setIsDarkMode(document.documentElement.classList.contains("dark"))
+      }
+
+      checkDarkMode()
+
+      const observer = new MutationObserver(checkDarkMode)
+      observer.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ["class"],
+      })
+
+      return () => observer.disconnect()
+    }
+  }, [])
+
+  useEffect(() => {
     const savedPrefs = localStorage.getItem(`chart-prefs-${symbol}`)
     if (savedPrefs) {
       const prefs = JSON.parse(savedPrefs)
       setShowZones(prefs.showZones || false)
-      // Restore visibility states
       setLevelGroups((prev) => {
         const updated = { ...prev }
         Object.keys(updated).forEach((key) => {
@@ -108,40 +126,52 @@ export function ChartContainer() {
   }, [levelGroups, showZones, symbol])
 
   const getChartColors = () => {
-    const isDark = document.documentElement.classList.contains("dark")
     return {
       background: "transparent",
-      textColor: isDark ? "#e4e4e7" : "#18181b",
-      borderColor: isDark ? "#27272a" : "#e4e4e7",
+      textColor: isDarkMode ? "#e4e4e7" : "#18181b",
+      borderColor: isDarkMode ? "#27272a" : "#e4e4e7",
       upColor: "#22c55e",
       downColor: "#ef4444",
-      daily: "#3B82F6", // blue
+      daily: "#3B82F6", // light blue
       weekly: "#10B981", // green
-      monthly: "#8B5CF6", // purple
+      monthly: "#F59E0B", // orange
     }
   }
 
   const getLineStyle = (timeframe: string) => {
     switch (timeframe) {
       case "daily":
-        return 2 // dashed
+        return 2 // dashed - thin line
       case "weekly":
-        return 0 // solid
+        return 0 // solid - medium thickness
       case "monthly":
-        return 1 // dotted
+        return 1 // dotted - bold line
       default:
         return 0
     }
   }
 
+  const getLineWidth = (timeframe: string) => {
+    switch (timeframe) {
+      case "daily":
+        return 1 // thin
+      case "weekly":
+        return 2 // medium
+      case "monthly":
+        return 3 // bold
+      default:
+        return 1
+    }
+  }
+
   useEffect(() => {
-    if (typeof window !== "undefined" && chartContainerRef.current) {
+    if (typeof window !== "undefined" && chartContainerRef.current && !chartRef.current) {
       import("lightweight-charts").then(({ createChart, CandlestickSeries, LineSeries }) => {
         try {
           console.log("[v0] Initializing chart...")
           const colors = getChartColors()
 
-          if (!chartContainerRef.current) return
+          if (!chartContainerRef.current || chartRef.current) return
 
           const containerWidth = chartContainerRef.current.clientWidth || 800
           const containerHeight = Math.max(500, window.innerHeight * 0.7)
@@ -154,8 +184,8 @@ export function ChartContainer() {
               textColor: colors.textColor,
             },
             grid: {
-              vertLines: { color: colors.borderColor },
-              horzLines: { color: colors.borderColor },
+              vertLines: { color: "rgba(42,46,57,0)" }, // disabled vertical lines
+              horzLines: { color: "rgba(42,46,57,0.2)" }, // subtle horizontal lines
             },
             crosshair: { mode: 1 },
             rightPriceScale: { borderColor: colors.borderColor },
@@ -185,7 +215,8 @@ export function ChartContainer() {
           }
 
           window.addEventListener("resize", handleResize)
-          return () => {
+
+          chartRef.current.cleanup = () => {
             window.removeEventListener("resize", handleResize)
             if (chart) chart.remove()
           }
@@ -196,87 +227,139 @@ export function ChartContainer() {
     }
 
     return () => {
-      if (chartRef.current?.chart) {
-        chartRef.current.chart.remove()
+      if (chartRef.current?.cleanup) {
+        chartRef.current.cleanup()
         chartRef.current = null
       }
     }
   }, [])
 
+  useEffect(() => {
+    if (chartRef.current?.chart) {
+      const colors = getChartColors()
+      chartRef.current.chart.applyOptions({
+        layout: {
+          background: { color: colors.background },
+          textColor: colors.textColor,
+        },
+        grid: {
+          vertLines: { color: "rgba(42,46,57,0)" },
+          horzLines: { color: "rgba(42,46,57,0.2)" },
+        },
+        rightPriceScale: { borderColor: colors.borderColor },
+        timeScale: { borderColor: colors.borderColor },
+      })
+    }
+  }, [isDarkMode])
+
   const drawLevels = (timeframe: "daily" | "weekly" | "monthly", levelsData: LevelsData, isSnapshot = false) => {
     if (!chartRef.current?.chart || !chartRef.current?.LineSeries) return
+
+    const validatedLevels = validateLevelsData(levelsData)
+    if (!validatedLevels) {
+      console.warn("[v0] Invalid levels data, skipping draw:", levelsData)
+      return
+    }
 
     const { chart, LineSeries } = chartRef.current
     const colors = getChartColors()
     const color = colors[timeframe]
     const lineStyle = getLineStyle(timeframe)
+    const lineWidth = getLineWidth(timeframe)
     const suffix = isSnapshot ? "·S" : ""
 
     const groupKey = `levels:${timeframe}${isSnapshot ? ":snapshot" : ""}`
     if (levelGroups[groupKey]) {
       levelGroups[groupKey].lineSeries.forEach((series: any) => {
-        chart.removeSeries(series)
+        try {
+          chart.removeSeries(series)
+        } catch (error) {
+          console.warn("[v0] Error removing series:", error)
+        }
       })
     }
 
     const newLineSeries: any[] = []
     const lines = [
-      { price: levelsData.upper2, title: `+2σ·${timeframe.charAt(0).toUpperCase()}${suffix}` },
-      { price: levelsData.upper1, title: `+1σ·${timeframe.charAt(0).toUpperCase()}${suffix}` },
-      { price: levelsData.lower1, title: `-1σ·${timeframe.charAt(0).toUpperCase()}${suffix}` },
-      { price: levelsData.lower2, title: `-2σ·${timeframe.charAt(0).toUpperCase()}${suffix}` },
+      { price: validatedLevels.upper2, title: `+2σ-${timeframe.charAt(0).toUpperCase()}${suffix}`, showLabel: true },
+      { price: validatedLevels.upper1, title: `+1σ-${timeframe.charAt(0).toUpperCase()}${suffix}`, showLabel: true },
+      { price: validatedLevels.lower1, title: `-1σ-${timeframe.charAt(0).toUpperCase()}${suffix}`, showLabel: true },
+      { price: validatedLevels.lower2, title: `-2σ-${timeframe.charAt(0).toUpperCase()}${suffix}`, showLabel: true },
     ]
 
-    const badgePositions = calculateBadgePositions(lines.map((l) => l.price))
+    lines.forEach(({ price, title, showLabel }) => {
+      try {
+        const lineSeries = chart.addSeries(LineSeries, {
+          color,
+          lineWidth,
+          lineStyle,
+          title: showLabel ? title : "",
+          priceLineVisible: showLabel,
+          lastValueVisible: false,
+          priceFormat: {
+            type: "price",
+            precision: 2,
+            minMove: 0.01,
+          },
+        })
 
-    lines.forEach(({ price, title }, index) => {
-      const lineSeries = chart.addSeries(LineSeries, {
-        color,
-        lineWidth: 1, // thin lines
-        lineStyle,
-        title,
-        priceLineVisible: true,
-        lastValueVisible: false, // Remove mid-chart text
-        priceFormat: {
-          type: "price",
-          precision: 2,
-          minMove: 0.01,
-        },
-      })
+        lineSeries.setData([
+          { time: "2024-01-01", value: price },
+          { time: "2024-12-31", value: price },
+        ])
 
-      lineSeries.setData([
-        { time: "2024-01-01", value: price },
-        { time: "2024-12-31", value: price },
-      ])
-
-      newLineSeries.push(lineSeries)
+        newLineSeries.push(lineSeries)
+      } catch (error) {
+        console.warn("[v0] Error creating line series:", error)
+      }
     })
 
     if (showZones && !isSnapshot) {
-      const zoneSeries = chart.addSeries(LineSeries, {
-        color,
-        lineWidth: 0,
-        topColor: `${color}26`, // 15% opacity
-        bottomColor: `${color}26`,
-        lineVisible: false,
-        crosshairMarkerVisible: false,
-      })
+      try {
+        const supportZone = chart.addSeries(LineSeries, {
+          color: "rgba(34, 197, 94, 0.1)", // light green
+          lineWidth: 0,
+          topColor: "rgba(34, 197, 94, 0.1)",
+          bottomColor: "rgba(34, 197, 94, 0.05)",
+          lineVisible: false,
+          crosshairMarkerVisible: false,
+          priceLineVisible: false,
+          lastValueVisible: false,
+        })
 
-      // Create zone between +1σ and -1σ
-      zoneSeries.setData([
-        { time: "2024-01-01", value: levelsData.upper1 },
-        { time: "2024-12-31", value: levelsData.lower1 },
-      ])
+        supportZone.setData([
+          { time: "2024-01-01", value: validatedLevels.lower1 },
+          { time: "2024-12-31", value: validatedLevels.lower2 },
+        ])
 
-      newLineSeries.push(zoneSeries)
+        const resistanceZone = chart.addSeries(LineSeries, {
+          color: "rgba(239, 68, 68, 0.1)", // light red
+          lineWidth: 0,
+          topColor: "rgba(239, 68, 68, 0.1)",
+          bottomColor: "rgba(239, 68, 68, 0.05)",
+          lineVisible: false,
+          crosshairMarkerVisible: false,
+          priceLineVisible: false,
+          lastValueVisible: false,
+        })
+
+        resistanceZone.setData([
+          { time: "2024-01-01", value: validatedLevels.upper1 },
+          { time: "2024-12-31", value: validatedLevels.upper2 },
+        ])
+
+        newLineSeries.push(supportZone, resistanceZone)
+      } catch (error) {
+        console.warn("[v0] Error creating zones:", error)
+      }
     }
 
     setLevelGroups((prev) => ({
       ...prev,
       [groupKey]: {
         timeframe,
-        levels: levelsData,
-        visible: true,
+        levels: validatedLevels,
+        visible: prev[groupKey]?.visible ?? timeframe !== "monthly",
         lineSeries: newLineSeries,
       },
     }))
@@ -290,7 +373,6 @@ export function ChartContainer() {
     sorted.forEach((price, index) => {
       let position = price
 
-      // Check for overlaps with previous positions
       for (let i = 0; i < positions.length; i++) {
         if (Math.abs(position - positions[i]) < minSpacing) {
           position = positions[i] + (position > positions[i] ? minSpacing : -minSpacing)
@@ -311,12 +393,11 @@ export function ChartContainer() {
       if (updated[groupKey]) {
         updated[groupKey].visible = !updated[groupKey].visible
 
-        // Show/hide series
         updated[groupKey].lineSeries.forEach((series: any) => {
-          if (updated[groupKey].visible) {
-            series.applyOptions({ visible: true })
-          } else {
-            series.applyOptions({ visible: false })
+          try {
+            series.applyOptions({ visible: updated[groupKey].visible })
+          } catch (error) {
+            console.warn("[v0] Error toggling series visibility:", error)
           }
         })
       }
@@ -327,7 +408,6 @@ export function ChartContainer() {
 
   const toggleFocusMode = (timeframe: string) => {
     if (focusMode === timeframe) {
-      // Restore all
       setFocusMode(null)
       Object.keys(levelGroups).forEach((key) => {
         levelGroups[key].lineSeries.forEach((series: any) => {
@@ -335,7 +415,6 @@ export function ChartContainer() {
         })
       })
     } else {
-      // Hide others
       setFocusMode(timeframe)
       Object.keys(levelGroups).forEach((key) => {
         const isTarget = key.includes(timeframe)
@@ -432,7 +511,6 @@ export function ChartContainer() {
         setSnapshots(data.data || [])
       }
     } catch (error) {
-      // Silently handle missing database tables - don't show error to user
       console.log("Snapshots not available yet - database tables may need to be created")
       setSnapshots([])
     }
@@ -513,27 +591,41 @@ export function ChartContainer() {
         if (validatedLevels) {
           drawLevels(timeframe, validatedLevels)
 
-          // Save to database
-          await fetch("/api/level-sets/upsert", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              symbol,
-              timeframe,
-              asOfDate: date,
-              ...validatedLevels,
-            }),
-          })
+          try {
+            const upsertResponse = await fetch("/api/level-sets/upsert", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                symbol,
+                timeframe,
+                asOfDate: date,
+                ...validatedLevels,
+              }),
+            })
+
+            if (!upsertResponse.ok) {
+              const errorData = await upsertResponse.json()
+              if (upsertResponse.status === 503 && errorData.code === "TABLES_NOT_FOUND") {
+                console.warn("[v0] Database tables not found, levels drawn but not saved")
+              } else {
+                console.warn("[v0] Failed to save levels to database:", errorData.error)
+              }
+            }
+          } catch (dbError) {
+            console.warn("[v0] Database operation failed, continuing with chart display:", dbError)
+          }
 
           toast({ title: "Success", description: `Levels marked: ${symbol} · ${timeframe}` })
         }
       } else {
-        throw new Error(result.message)
+        throw new Error(result.message || "Failed to calculate levels")
       }
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Failed to mark levels"
+      console.warn("[v0] Auto-mark levels error:", errorMessage)
       toast({
         title: "Failed to mark levels",
-        description: "Check API connection and try again",
+        description: errorMessage,
         variant: "destructive",
       })
     } finally {
@@ -545,7 +637,7 @@ export function ChartContainer() {
     if (!data || typeof data !== "object") return null
     const { upper1, lower1, upper2, lower2 } = data
     const nums = [upper1, lower1, upper2, lower2].map(Number)
-    if (nums.some(isNaN)) return null
+    if (nums.some(isNaN) || nums.some((n) => !isFinite(n))) return null
     return { upper1: nums[0], lower1: nums[1], upper2: nums[2], lower2: nums[3] }
   }
 
@@ -641,7 +733,6 @@ export function ChartContainer() {
       <Card>
         <CardContent className="p-0 relative">
           <div className="absolute top-4 right-4 z-10 flex items-center gap-4 bg-background/80 backdrop-blur-sm rounded-lg p-2 border">
-            {/* Timeframe toggles */}
             <div className="flex items-center gap-2">
               {(["daily", "weekly", "monthly"] as const).map((timeframe) => {
                 const groupKey = `levels:${timeframe}`
@@ -675,7 +766,29 @@ export function ChartContainer() {
               })}
             </div>
 
-            {/* Zones toggle */}
+            <div className="flex items-center gap-2 border-l pl-4">
+              <div className="text-xs space-y-1">
+                {Object.entries(levelGroups)
+                  .filter(([key, group]) => key.startsWith("levels:") && !key.includes("snapshot") && group.visible)
+                  .map(([key, group]) => {
+                    const timeframe = key.split(":")[1]
+                    const colors = getChartColors()
+                    return (
+                      <div key={key} className="flex items-center gap-1">
+                        <div
+                          className="w-2 h-2 rounded-full"
+                          style={{ backgroundColor: colors[timeframe as keyof typeof colors] }}
+                        />
+                        <span className="text-xs">
+                          {timeframe.charAt(0).toUpperCase()}: ±{group.levels.upper1.toFixed(2)}/±
+                          {group.levels.upper2.toFixed(2)}
+                        </span>
+                      </div>
+                    )
+                  })}
+              </div>
+            </div>
+
             <div className="flex items-center gap-2 border-l pl-4">
               <Label htmlFor="zones-toggle" className="text-xs">
                 Zones
@@ -683,7 +796,6 @@ export function ChartContainer() {
               <Switch id="zones-toggle" checked={showZones} onCheckedChange={setShowZones} className="scale-75" />
             </div>
 
-            {/* Save/Load controls */}
             <div className="flex items-center gap-2 border-l pl-4">
               <Dialog open={saveDialogOpen} onOpenChange={setSaveDialogOpen}>
                 <DialogTrigger asChild>
