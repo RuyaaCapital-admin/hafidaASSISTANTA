@@ -10,7 +10,7 @@ export default function ChartPage() {
           <div className="flex flex-col space-y-2">
             <h1 className="text-3xl font-bold tracking-tight">Hafid Assistanta Chart</h1>
             <p className="text-muted-foreground">
-              Search and visualize any stock with support and resistance levels using ±1σ and ±2σ bands
+              Search and visualize stocks, forex, and crypto with support and resistance levels using ±1σ and ±2σ bands
             </p>
           </div>
           <ChartContainer />

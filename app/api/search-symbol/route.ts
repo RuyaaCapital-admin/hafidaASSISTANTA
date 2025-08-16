@@ -11,10 +11,17 @@ interface EODHDSearchResult {
   Currency: string
 }
 
+interface SearchResultItem {
+  display: string
+  providerSymbol: string
+  type: "stock" | "etf" | "forex" | "crypto"
+  exchange?: string
+}
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
-    const query = searchParams.get("q")
+    const query = searchParams.get("query")
 
     if (!query || query.length < 1) {
       return NextResponse.json({ error: "Missing or invalid query parameter" }, { status: 400 })
@@ -32,6 +39,9 @@ export async function GET(request: NextRequest) {
     const response = await fetch(url)
 
     if (!response.ok) {
+      if (response.status === 429) {
+        return NextResponse.json({ error: "Search temporarily unavailable" }, { status: 429 })
+      }
       throw new Error(`EODHD API error: ${response.status} ${response.statusText}`)
     }
 
@@ -41,18 +51,37 @@ export async function GET(request: NextRequest) {
       return NextResponse.json([])
     }
 
-    // Transform and filter results
-    const suggestions = data
-      .filter((item) => item.Type === "Common Stock" || item.Type === "ETF") // Only stocks and ETFs
-      .slice(0, 10) // Limit to 10 results
-      .map((item) => ({
-        symbol: `${item.Code}.${item.Exchange}`,
-        name: item.Name,
-        exchange: item.Exchange,
-        country: item.Country,
-        currency: item.Currency,
-        displayText: `${item.Code}.${item.Exchange} - ${item.Name}`,
-      }))
+    const suggestions: SearchResultItem[] = data
+      .slice(0, 15) // Limit to 15 results
+      .map((item): SearchResultItem => {
+        const code = item.Code
+        const exchange = item.Exchange
+        let providerSymbol: string
+        let type: "stock" | "etf" | "forex" | "crypto"
+
+        // Map exchange to proper suffix
+        if (exchange === "CC") {
+          providerSymbol = `${code}-USD.CC`
+          type = "crypto"
+        } else if (exchange === "FOREX") {
+          providerSymbol = `${code}.FOREX`
+          type = "forex"
+        } else if (exchange === "US") {
+          providerSymbol = `${code}.US`
+          type = item.Type === "ETF" ? "etf" : "stock"
+        } else {
+          // For other exchanges, keep the original format
+          providerSymbol = `${code}.${exchange}`
+          type = item.Type === "ETF" ? "etf" : "stock"
+        }
+
+        return {
+          display: item.Name || code,
+          providerSymbol,
+          type,
+          exchange: exchange,
+        }
+      })
 
     return NextResponse.json(suggestions)
   } catch (error) {

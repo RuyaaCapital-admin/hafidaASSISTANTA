@@ -323,7 +323,9 @@ export function ChartContainer() {
   }
 
   const handleSymbolSelect = (selectedSymbol: string) => {
-    setSymbol(selectedSymbol)
+    const cleanedSymbol = validateSymbol(selectedSymbol)
+    console.log("[v0] Symbol selected:", selectedSymbol, "cleaned:", cleanedSymbol)
+    setSymbol(cleanedSymbol)
     setTimeout(() => {
       fetchChartData()
       fetchLevels()
@@ -394,6 +396,12 @@ export function ChartContainer() {
       upper2: numUpper2,
       lower2: numLower2,
     }
+  }
+
+  const validateSymbol = (symbol: string): string => {
+    // Implement symbol validation logic here
+    // For example, ensure the symbol is in the correct format
+    return symbol.trim().toUpperCase()
   }
 
   return (
