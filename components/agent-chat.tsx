@@ -4,7 +4,7 @@ import type React from "react"
 import { useState, useRef, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Upload, Send, ImageIcon, FileText, Loader2 } from "lucide-react"
+import { Upload, Send, ImageIcon, FileText, Loader2, Activity } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
 interface Message {
@@ -15,12 +15,9 @@ interface Message {
 }
 
 interface AgentResponse {
-  type: "chat" | "function"
-  message: string
-  symbols?: string[]
-  levels?: string[]
-  error?: string
-  clientEvent?: { type: string; data: any }
+  type: "chat" | "actions"
+  message?: string
+  actions?: Array<{ kind: string; payload: any }>
 }
 
 export function AgentChat() {
@@ -36,37 +33,15 @@ export function AgentChat() {
   const [input, setInput] = useState("")
   const [file, setFile] = useState<File | null>(null)
   const [loading, setLoading] = useState(false)
+  const [status, setStatus] = useState<{ active: boolean; text: string; error: boolean }>({
+    active: false,
+    text: "",
+    error: false,
+  })
   const fileInputRef = useRef<HTMLInputElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
   const { toast } = useToast()
-
-  useEffect(() => {
-    const handleChartSwitch = (event: CustomEvent) => {
-      console.log("[v0] Chart switch event received:", event.detail)
-      // Chart will handle the symbol switch
-    }
-
-    const handleChartUpdate = (event: CustomEvent) => {
-      console.log("[v0] Chart update event received:", event.detail)
-      // Chart will handle the price update
-    }
-
-    const handleDrawLevels = (event: CustomEvent) => {
-      console.log("[v0] Draw levels event received:", event.detail)
-      // Chart will handle drawing levels
-    }
-
-    window.addEventListener("chart:switch", handleChartSwitch as EventListener)
-    window.addEventListener("chart:updateHeader", handleChartUpdate as EventListener)
-    window.addEventListener("chart:drawLevels", handleDrawLevels as EventListener)
-
-    return () => {
-      window.removeEventListener("chart:switch", handleChartSwitch as EventListener)
-      window.removeEventListener("chart:updateHeader", handleChartUpdate as EventListener)
-      window.removeEventListener("chart:drawLevels", handleDrawLevels as EventListener)
-    }
-  }, [])
 
   const scrollToBottom = () => {
     if (messagesContainerRef.current) {
@@ -109,6 +84,7 @@ export function AgentChat() {
 
     setMessages((prev) => [...prev, userMessage])
     setLoading(true)
+    setStatus({ active: true, text: "Processing request...", error: false })
 
     try {
       console.log("[v0] Sending request to /api/ingest...")
@@ -137,42 +113,41 @@ export function AgentChat() {
       const result: AgentResponse = await response.json()
       console.log("[v0] API response data:", result)
 
-      let responseContent = result.message
+      if (result.type === "actions" && result.actions) {
+        setStatus({ active: true, text: "Executing actions...", error: false })
 
-      if (result.symbols && result.symbols.length > 0) {
-        responseContent += `\n\n🎯 Symbols: ${result.symbols.join(", ")}`
-      }
+        // Dispatch actions to chart
+        for (const action of result.actions) {
+          console.log("[v0] Dispatching action:", action)
+          window.dispatchEvent(new CustomEvent("agent:action", { detail: action }))
+        }
 
-      if (result.levels && result.levels.length > 0) {
-        responseContent += `\n\n📊 Levels: ${result.levels.slice(0, 3).join(", ")}${result.levels.length > 3 ? `... (${result.levels.length} total)` : ""}`
-      }
+        // Add response message if provided
+        if (result.message) {
+          const assistantMessage: Message = {
+            id: (Date.now() + 1).toString(),
+            type: "assistant",
+            content: result.message,
+            timestamp: new Date(),
+          }
+          setMessages((prev) => [...prev, assistantMessage])
+        }
 
-      if (result.error) {
-        responseContent += `\n\n⚠️ ${result.error}`
-      }
-
-      const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        type: "assistant",
-        content: responseContent,
-        timestamp: new Date(),
-      }
-
-      setMessages((prev) => [...prev, assistantMessage])
-
-      if (result.clientEvent) {
-        console.log("[v0] Emitting client event:", result.clientEvent)
-        window.dispatchEvent(new CustomEvent(result.clientEvent.type, { detail: result.clientEvent.data }))
-      }
-
-      if (result.type === "function") {
-        toast({
-          title: "Action completed",
-          description: result.symbols?.[0] ? `${result.symbols[0]} · ${result.message}` : result.message,
-        })
+        setStatus({ active: false, text: "Actions completed", error: false })
+      } else {
+        // Handle chat response
+        const assistantMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          type: "assistant",
+          content: result.message || "I'm here to help!",
+          timestamp: new Date(),
+        }
+        setMessages((prev) => [...prev, assistantMessage])
+        setStatus({ active: false, text: "Response generated", error: false })
       }
     } catch (error) {
       console.error("[v0] Chat error:", error)
+      setStatus({ active: false, text: "Error occurred", error: true })
 
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
@@ -195,11 +170,26 @@ export function AgentChat() {
       if (fileInputRef.current) {
         fileInputRef.current.value = ""
       }
+      // Clear status after 2 seconds
+      setTimeout(() => {
+        setStatus({ active: false, text: "", error: false })
+      }, 2000)
     }
   }
 
   return (
     <div className="h-full flex flex-col">
+      {status.active || status.text ? (
+        <div
+          className={`px-4 py-2 border-b flex items-center gap-2 text-xs ${
+            status.error ? "bg-red-50 text-red-700 border-red-200" : "bg-green-50 text-green-700 border-green-200"
+          }`}
+        >
+          <Activity className={`h-3 w-3 ${status.active ? "animate-pulse" : ""}`} />
+          <span>{status.text}</span>
+        </div>
+      ) : null}
+
       <div
         ref={messagesContainerRef}
         className="flex-1 overflow-y-auto overscroll-contain p-4 space-y-3"

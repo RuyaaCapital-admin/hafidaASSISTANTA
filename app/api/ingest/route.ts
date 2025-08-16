@@ -240,7 +240,7 @@ async function handleAnalyze(symbol: string) {
 
     if (prevCandle) {
       const change = (((lastCandle.close - prevCandle.close) / prevCandle.close) * 100).toFixed(2)
-      analysis += `Change: ${change > 0 ? "+" : ""}${change}%\n`
+      analysis += `Change: ${Number.parseFloat(change) > 0 ? "+" : ""}${change}%\n`
     }
 
     analysis += `Range: $${lastCandle.low.toFixed(2)} - $${lastCandle.high.toFixed(2)}\n`
@@ -268,10 +268,23 @@ async function handleAnalyze(symbol: string) {
 
 async function generateChatResponse(message: string): Promise<string> {
   try {
+    if (!message || typeof message !== "string") {
+      console.log("[v0] Invalid message parameter, using fallback")
+      return "I'm here to help! Try commands like 'switch to AAPL', 'price TSLA', or 'mark BTC levels'."
+    }
+
+    const trimmedMessage = message.trim()
+    if (trimmedMessage.length === 0) {
+      console.log("[v0] Empty message, using fallback")
+      return "I'm here to help! Try commands like 'switch to AAPL', 'price TSLA', or 'mark BTC levels'."
+    }
+
     const openai = createOpenAIClient()
     if (!openai) {
       return "I'm having trouble connecting to the AI service. Please check that the OpenAI API key is properly configured."
     }
+
+    console.log("[v0] Generating OpenAI response for message:", trimmedMessage.substring(0, 50))
 
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
@@ -285,12 +298,19 @@ async function generateChatResponse(message: string): Promise<string> {
         },
         {
           role: "user",
-          content: message,
+          content: trimmedMessage,
         },
       ],
     })
 
-    return response.choices[0]?.message?.content || "I'm here to help with trading analysis!"
+    const aiResponse = response?.choices?.[0]?.message?.content
+    if (!aiResponse || typeof aiResponse !== "string") {
+      console.log("[v0] Invalid OpenAI response, using fallback")
+      return "I'm here to help with trading analysis!"
+    }
+
+    console.log("[v0] OpenAI response generated successfully")
+    return aiResponse
   } catch (error) {
     console.error("[v0] Error generating chat response:", error)
     return "I'm here to help! Try commands like 'switch to AAPL', 'price TSLA', or 'mark BTC levels'."
@@ -311,29 +331,187 @@ export async function POST(request: NextRequest) {
       switch (functionCall.type) {
         case "switch":
           if (functionCall.symbol) {
-            const result = await handleSwitchSymbol(functionCall.symbol)
-            return NextResponse.json(result)
+            const resolved = resolveSymbol(functionCall.symbol)
+            if (resolved.error) {
+              return NextResponse.json({
+                type: "chat",
+                message: `❌ ${resolved.error}`,
+              })
+            }
+            return NextResponse.json({
+              type: "actions",
+              actions: [
+                { kind: "switch", payload: { symbol: resolved.provider } },
+                { kind: "toast", payload: { text: `Switched to ${resolved.user}` } },
+              ],
+            })
           }
           break
 
         case "price":
           if (functionCall.symbol) {
-            const result = await handleGetPrice(functionCall.symbol)
-            return NextResponse.json(result)
+            try {
+              const resolved = resolveSymbol(functionCall.symbol)
+              if (resolved.error) {
+                return NextResponse.json({
+                  type: "chat",
+                  message: `❌ ${resolved.error}`,
+                })
+              }
+
+              const response = await fetch(
+                `${request.headers.get("origin") || process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000"}/api/chart-data?symbol=${resolved.provider}&interval=daily`,
+              )
+
+              if (!response.ok) throw new Error(`Failed to fetch price data`)
+
+              const data = await response.json()
+              if (data && data.length > 0) {
+                const lastCandle = data[data.length - 1]
+                const price = lastCandle.close
+
+                return NextResponse.json({
+                  type: "actions",
+                  message: `${resolved.user} price: $${price.toFixed(2)}`,
+                  actions: [
+                    { kind: "updateHeader", payload: { symbol: resolved.provider, last: price } },
+                    { kind: "toast", payload: { text: `${resolved.user} $${price.toFixed(2)}` } },
+                  ],
+                })
+              } else {
+                throw new Error("No price data available")
+              }
+            } catch (error) {
+              return NextResponse.json({
+                type: "chat",
+                message: `❌ Failed to get price for ${functionCall.symbol}`,
+              })
+            }
           }
           break
 
         case "mark_levels":
           if (functionCall.symbol) {
-            const result = await handleMarkLevels(functionCall.symbol, functionCall.timeframe)
-            return NextResponse.json(result)
+            try {
+              const resolved = resolveSymbol(functionCall.symbol)
+              if (resolved.error) {
+                return NextResponse.json({
+                  type: "chat",
+                  message: `❌ ${resolved.error}`,
+                })
+              }
+
+              const response = await fetch(
+                `${request.headers.get("origin") || process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000"}/api/chart-data?symbol=${resolved.provider}&interval=${functionCall.timeframe || "daily"}`,
+              )
+
+              if (!response.ok) throw new Error(`Failed to fetch chart data`)
+
+              const data = await response.json()
+              if (data && data.length > 0) {
+                // Compute sigma lines using existing logic
+                const prices = data.map((candle: any) => candle.close)
+                const mean = prices.reduce((sum: number, price: number) => sum + price, 0) / prices.length
+                const variance =
+                  prices.reduce((sum: number, price: number) => sum + Math.pow(price - mean, 2), 0) / prices.length
+                const stdDev = Math.sqrt(variance)
+
+                const lines = [
+                  { price: mean + stdDev, label: "+1σ", color: "#22c55e", width: 1 },
+                  { price: mean - stdDev, label: "-1σ", color: "#22c55e", width: 1 },
+                  { price: mean + 2 * stdDev, label: "+2σ", color: "#ef4444", width: 2 },
+                  { price: mean - 2 * stdDev, label: "-2σ", color: "#ef4444", width: 2 },
+                ]
+
+                // Optional persist to database
+                try {
+                  await fetch(
+                    `${request.headers.get("origin") || process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000"}/api/level-sets/upsert`,
+                    {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        symbol: resolved.provider,
+                        timeframe: functionCall.timeframe || "daily",
+                        lines,
+                      }),
+                    },
+                  )
+                } catch (dbError) {
+                  console.log("[v0] Database save failed (expected if tables don't exist):", dbError)
+                }
+
+                return NextResponse.json({
+                  type: "actions",
+                  actions: [
+                    {
+                      kind: "drawLevels",
+                      payload: { symbol: resolved.provider, timeframe: functionCall.timeframe || "daily", lines },
+                    },
+                    {
+                      kind: "toast",
+                      payload: { text: `${resolved.user} ${functionCall.timeframe || "daily"} levels drawn` },
+                    },
+                  ],
+                })
+              } else {
+                throw new Error("No chart data available")
+              }
+            } catch (error) {
+              return NextResponse.json({
+                type: "chat",
+                message: `❌ Failed to mark levels for ${functionCall.symbol}`,
+              })
+            }
           }
           break
 
         case "analyze":
           if (functionCall.symbol) {
-            const result = await handleAnalyze(functionCall.symbol)
-            return NextResponse.json(result)
+            try {
+              const resolved = resolveSymbol(functionCall.symbol)
+              if (resolved.error) {
+                return NextResponse.json({
+                  type: "chat",
+                  message: `❌ ${resolved.error}`,
+                })
+              }
+
+              const response = await fetch(
+                `${request.headers.get("origin") || process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000"}/api/chart-data?symbol=${resolved.provider}&interval=daily`,
+              )
+
+              if (!response.ok) throw new Error(`Failed to fetch price data`)
+
+              const priceData = await response.json()
+              if (!priceData || priceData.length === 0) {
+                throw new Error("No price data available for analysis")
+              }
+
+              const lastCandle = priceData[priceData.length - 1]
+              const prevCandle = priceData[priceData.length - 2]
+
+              let analysis = `📊 ${resolved.user} Analysis:\n`
+              analysis += `Current: $${lastCandle.close.toFixed(2)}\n`
+
+              if (prevCandle) {
+                const change = (((lastCandle.close - prevCandle.close) / prevCandle.close) * 100).toFixed(2)
+                analysis += `Change: ${Number.parseFloat(change) > 0 ? "+" : ""}${change}%\n`
+              }
+
+              analysis += `Range: $${lastCandle.low.toFixed(2)} - $${lastCandle.high.toFixed(2)}\n`
+              analysis += `Volume: ${lastCandle.volume?.toLocaleString() || "N/A"}`
+
+              return NextResponse.json({
+                type: "chat",
+                message: analysis,
+              })
+            } catch (error) {
+              return NextResponse.json({
+                type: "chat",
+                message: `❌ Failed to analyze ${functionCall.symbol}`,
+              })
+            }
           }
           break
 
@@ -342,11 +520,8 @@ export async function POST(request: NextRequest) {
           // Handle as regular chat
           const chatResponse = await generateChatResponse(message)
           return NextResponse.json({
-            success: true,
             type: "chat",
             message: chatResponse,
-            symbols: [],
-            levels: [],
           })
       }
     }
@@ -447,16 +622,9 @@ export async function POST(request: NextRequest) {
     )
   } catch (error) {
     console.error("[v0] Error processing request:", error)
-    return NextResponse.json(
-      {
-        success: false,
-        type: "chat",
-        message: "Sorry, I encountered an error. Please try again.",
-        symbols: [],
-        levels: [],
-        error: error instanceof Error ? error.message : "Unknown error",
-      },
-      { status: 500 },
-    )
+    return NextResponse.json({
+      type: "chat",
+      message: "❌ Sorry, I encountered an error. Please try again.",
+    })
   }
 }

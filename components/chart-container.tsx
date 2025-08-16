@@ -127,7 +127,7 @@ export function ChartContainer() {
     savePreferences()
   }, [levelGroups, showZones, symbol])
 
-  const getChartColors = () => {
+  const getChartColors = (isDarkMode: boolean) => {
     return {
       background: "transparent",
       textColor: isDarkMode ? "#e4e4e7" : "#18181b",
@@ -137,6 +137,7 @@ export function ChartContainer() {
       daily: "#3B82F6", // light blue
       weekly: "#10B981", // green
       monthly: "#F59E0B", // orange
+      gridColor: isDarkMode ? "#27272a" : "#e4e4e7",
     }
   }
 
@@ -171,7 +172,7 @@ export function ChartContainer() {
       import("lightweight-charts").then(({ createChart, CandlestickSeries, LineSeries }) => {
         try {
           console.log("[v0] Initializing chart...")
-          const colors = getChartColors()
+          const colors = getChartColors(isDarkMode)
 
           if (!chartContainerRef.current || chartRef.current) return
 
@@ -239,7 +240,7 @@ export function ChartContainer() {
 
   useEffect(() => {
     if (chartRef.current?.chart) {
-      const colors = getChartColors()
+      const colors = getChartColors(isDarkMode)
       chartRef.current.chart.applyOptions({
         layout: {
           background: { color: colors.background },
@@ -284,7 +285,7 @@ export function ChartContainer() {
     }
 
     const { chart, LineSeries } = chartRef.current
-    const colors = getChartColors()
+    const colors = getChartColors(isDarkMode)
     const color = colors[timeframe]
     const lineStyle = getLineStyle(timeframe)
     const lineWidth = getLineWidth(timeframe)
@@ -672,20 +673,29 @@ export function ChartContainer() {
       try {
         // Get the latest candle for centering
         const latestCandle = chartData[chartData.length - 1]
-        const timeRange = chartData.length > 50 ? 50 : chartData.length
+        const currentPrice = latestCandle.close
+
+        // Calculate price range around current price (±5% buffer)
+        const priceBuffer = currentPrice * 0.05
+        const minPrice = currentPrice - priceBuffer
+        const maxPrice = currentPrice + priceBuffer
 
         // Set visible range to show last 50 candles or all available data
+        const timeRange = chartData.length > 50 ? 50 : chartData.length
         chartRef.current.chart.timeScale().setVisibleRange({
           from: chartData[Math.max(0, chartData.length - timeRange)].time,
           to: latestCandle.time,
         })
 
-        // Fit content to show all price levels
-        chartRef.current.chart.timeScale().fitContent()
+        // Set price scale to focus on current price area
+        chartRef.current.chart.priceScale("right").setVisibleRange({
+          from: minPrice,
+          to: maxPrice,
+        })
 
         toast({
           title: "Chart view reset",
-          description: "Centered on current price range",
+          description: `Centered on current price $${currentPrice.toFixed(2)}`,
         })
       } catch (error) {
         console.error("[v0] Error resetting chart view:", error)
@@ -719,6 +729,66 @@ export function ChartContainer() {
     // Real-time functionality will be implemented via server-side API routes
     console.log("[v0] Real-time updates temporarily disabled for security")
   }
+
+  useEffect(() => {
+    const handleAgentAction = (event: CustomEvent) => {
+      const action = event.detail
+      console.log("[v0] Received agent action:", action)
+
+      switch (action.kind) {
+        case "switch":
+          if (action.payload?.symbol) {
+            setSymbol(action.payload.symbol)
+            // Chart will auto-reload via symbol change effect
+          }
+          break
+
+        case "updateHeader":
+          if (action.payload?.symbol && action.payload?.last) {
+            setSymbol(action.payload.symbol)
+            // Update current price display if needed
+          }
+          break
+
+        case "drawLevels":
+          if (action.payload?.symbol && action.payload?.timeframe && action.payload?.lines) {
+            const { symbol: targetSymbol, timeframe, lines } = action.payload
+            if (targetSymbol === symbol) {
+              // Draw levels on current chart
+              const groupKey = `levels:${timeframe}`
+              setLevelGroups((prev) => ({
+                ...prev,
+                [groupKey]: {
+                  visible: true,
+                  levels: lines.map((line: any) => ({
+                    price: line.price,
+                    label: line.label,
+                    color: line.color,
+                    width: line.width || 1,
+                  })),
+                },
+              }))
+            }
+          }
+          break
+
+        case "toast":
+          if (action.payload?.text) {
+            toast({
+              title: "Action completed",
+              description: action.payload.text,
+            })
+          }
+          break
+      }
+    }
+
+    window.addEventListener("agent:action", handleAgentAction as EventListener)
+
+    return () => {
+      window.removeEventListener("agent:action", handleAgentAction as EventListener)
+    }
+  }, [symbol, toast])
 
   return (
     <div className="space-y-6">
@@ -899,7 +969,7 @@ export function ChartContainer() {
                   {(["daily", "weekly", "monthly"] as const).map((tf) => {
                     const groupKey = `levels:${tf}`
                     const group = levelGroups[groupKey]
-                    const colors = getChartColors()
+                    const colors = getChartColors(isDarkMode)
                     const isActive = group?.visible
 
                     return (
@@ -978,7 +1048,7 @@ export function ChartContainer() {
                 {Object.entries(levelGroups).map(([key, group]) => {
                   if (!group.visible || !group.levels) return null
                   const timeframe = key.split(":")[1]
-                  const colors = getChartColors()
+                  const colors = getChartColors(isDarkMode)
                   return (
                     <div key={key} className="flex items-center gap-2">
                       <div
