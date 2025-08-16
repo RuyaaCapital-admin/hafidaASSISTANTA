@@ -86,9 +86,27 @@ async function generateChatResponse(message: string): Promise<string> {
 
 export async function POST(request: NextRequest) {
   try {
+    console.log("[v0] Processing ingest request...")
+
+    if (!process.env.OPENAI_API_KEY) {
+      console.error("[v0] OpenAI API key not found in environment variables")
+      return NextResponse.json(
+        {
+          type: "chat",
+          message: "OpenAI API key is not configured. Please check your environment variables.",
+          symbols: [],
+          levels: [],
+          error: "Missing API key",
+        },
+        { status: 500 },
+      )
+    }
+
     const formData = await request.formData()
     const file = formData.get("file") as File
     const message = formData.get("message") as string
+
+    console.log("[v0] Request data:", { hasFile: !!file, message: message?.substring(0, 100) })
 
     if (!file && message) {
       const chartInstructions = detectChartInstructions(message)
@@ -98,6 +116,7 @@ export async function POST(request: NextRequest) {
         if (chartInstructions.symbols.length > 0 && chartInstructions.action === "mark_levels") {
           try {
             const firstSymbol = chartInstructions.symbols[0]
+            console.log("[v0] Marking levels for symbol:", firstSymbol)
             const levelsResult = await markLevels(firstSymbol, "daily")
 
             return NextResponse.json({
@@ -108,6 +127,7 @@ export async function POST(request: NextRequest) {
               error: levelsResult.success ? undefined : "Database not set up - levels shown on chart only",
             })
           } catch (error) {
+            console.error("[v0] Error marking levels:", error)
             return NextResponse.json({
               type: "function",
               message: `I can show levels for ${chartInstructions.symbols[0]} on the chart, but they won't be saved without database setup.`,
@@ -118,29 +138,53 @@ export async function POST(request: NextRequest) {
           }
         } else {
           // General chart analysis request
-          const chatResponse = await generateChatResponse(message)
-          return NextResponse.json({
-            type: "function",
-            message:
-              chatResponse +
-              (chartInstructions.symbols.length > 0
-                ? ` I see you mentioned ${chartInstructions.symbols.join(", ")}. Would you like me to mark levels for any of these?`
-                : ""),
-            symbols: chartInstructions.symbols,
-            levels: [],
-            error: undefined,
-          })
+          try {
+            console.log("[v0] Generating chat response for chart analysis...")
+            const chatResponse = await generateChatResponse(message)
+            return NextResponse.json({
+              type: "function",
+              message:
+                chatResponse +
+                (chartInstructions.symbols.length > 0
+                  ? ` I see you mentioned ${chartInstructions.symbols.join(", ")}. Would you like me to mark levels for any of these?`
+                  : ""),
+              symbols: chartInstructions.symbols,
+              levels: [],
+              error: undefined,
+            })
+          } catch (error) {
+            console.error("[v0] Error generating chat response:", error)
+            return NextResponse.json({
+              type: "chat",
+              message: "I'm having trouble processing your request right now. Please try again.",
+              symbols: [],
+              levels: [],
+              error: error instanceof Error ? error.message : "Unknown error",
+            })
+          }
         }
       } else {
         // Pure conversational response
-        const chatResponse = await generateChatResponse(message)
-        return NextResponse.json({
-          type: "chat",
-          message: chatResponse,
-          symbols: [],
-          levels: [],
-          error: undefined,
-        })
+        try {
+          console.log("[v0] Generating conversational response...")
+          const chatResponse = await generateChatResponse(message)
+          return NextResponse.json({
+            type: "chat",
+            message: chatResponse,
+            symbols: [],
+            levels: [],
+            error: undefined,
+          })
+        } catch (error) {
+          console.error("[v0] Error in conversational response:", error)
+          return NextResponse.json({
+            type: "chat",
+            message: "I'm having trouble processing your message right now. Please try again.",
+            symbols: [],
+            levels: [],
+            error: error instanceof Error ? error.message : "Unknown error",
+          })
+        }
       }
     }
 
@@ -226,6 +270,7 @@ export async function POST(request: NextRequest) {
     if (symbols.length > 0) {
       try {
         const firstSymbol = symbols[0]
+        console.log("[v0] Auto-refreshing levels for symbol:", firstSymbol)
         const levelsResult = await markLevels(firstSymbol, "daily")
         if (levelsResult.success) {
           console.log(`[v0] Auto-refreshed levels for ${firstSymbol} after ingest`)
@@ -245,14 +290,17 @@ export async function POST(request: NextRequest) {
       error: symbols.length === 0 ? "No valid symbols found in the data" : undefined,
     })
   } catch (error) {
-    console.error("Error processing request:", error)
+    console.error("[v0] Error processing request:", error)
+    const errorMessage = error instanceof Error ? error.message : "Unknown error occurred"
+    console.error("[v0] Full error details:", error)
+
     return NextResponse.json(
       {
         type: "chat",
         message: "Sorry, I encountered an error processing your request. Please try again.",
         symbols: [],
         levels: [],
-        error: (error as Error).message,
+        error: errorMessage,
       },
       { status: 500 },
     )

@@ -56,6 +56,7 @@ export function ChartContainer() {
   const [error, setError] = useState<string | null>(null)
   const [autoMarkLoading, setAutoMarkLoading] = useState(false)
   const [isDarkMode, setIsDarkMode] = useState(false)
+  const [currentPrice, setCurrentPrice] = useState<number>(0)
 
   const [levelGroups, setLevelGroups] = useState<Record<string, LevelGroup>>({})
   const [showZones, setShowZones] = useState(false)
@@ -66,6 +67,10 @@ export function ChartContainer() {
   const [saveDialogOpen, setSaveDialogOpen] = useState(false)
   const [snapshotName, setSnapshotName] = useState("")
   const [snapshotNote, setSnapshotNote] = useState("")
+
+  const [selectedTimeframe, setSelectedTimeframe] = useState<string>("1d")
+  const [wsConnection, setWsConnection] = useState<WebSocket | null>(null)
+  const [isRealTimeEnabled, setIsRealTimeEnabled] = useState(false)
 
   const chartContainerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<any>(null)
@@ -247,9 +252,17 @@ export function ChartContainer() {
           vertLines: { color: "rgba(42,46,57,0)" },
           horzLines: { color: "rgba(42,46,57,0.2)" },
         },
-        rightPriceScale: { borderColor: colors.borderColor },
-        timeScale: { borderColor: colors.borderColor },
+        rightPriceScale: {
+          borderColor: colors.borderColor,
+          textColor: colors.textColor, // Explicitly set price scale text color
+        },
+        timeScale: {
+          borderColor: colors.borderColor,
+          textColor: colors.textColor, // Explicitly set time scale text color
+        },
       })
+
+      chartRef.current.chart.timeScale().fitContent()
     }
   }, [isDarkMode])
 
@@ -521,62 +534,57 @@ export function ChartContainer() {
     fetchSnapshots()
   }, [symbol])
 
-  const fetchChartData = async () => {
+  const fetchChartData = async (timeframe?: string) => {
+    if (!symbol) return
+
+    const tf = timeframe || selectedTimeframe
     setLoading(true)
     setError(null)
 
     try {
-      const params = new URLSearchParams({ symbol, interval })
+      console.log(`[v0] Processing symbol: ${symbol} -> cleaned: ${validateSymbol(symbol)}`)
 
-      if (interval === "daily") {
-        const fromDate = new Date(date)
-        fromDate.setDate(fromDate.getDate() - 30)
-        params.append("from", fromDate.toISOString().split("T")[0])
-        params.append("to", date)
-      }
-
-      const cacheKey = `chart-${symbol}-${interval}-${date}`
-      const cachedData = getCachedData(cacheKey)
-
-      if (cachedData) {
-        setChartData(cachedData)
-        if (chartRef.current?.candlestickSeries) {
-          chartRef.current.candlestickSeries.setData(cachedData)
-        }
-        toast({ title: "Chart Updated", description: `Loaded ${cachedData.length} data points for ${symbol} (cached)` })
-        return
-      }
+      const cleanSymbol = validateSymbol(symbol)
+      const params = new URLSearchParams({
+        symbol: cleanSymbol,
+        interval: tf,
+      })
 
       const response = await fetch(`/api/chart-data?${params}`)
+      const data = await response.json()
+
       if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || `HTTP ${response.status}`)
+        throw new Error(data.error || `HTTP ${response.status}`)
       }
 
-      const data: ChartData[] = await response.json()
-      if (!data || data.length === 0) {
-        throw new Error(`No chart data available for ${symbol}`)
+      const candles = Array.isArray(data) ? data : data.candles || []
+
+      if (candles.length > 0) {
+        console.log(`[v0] Processed chart data: ${candles.length} candles`)
+        setChartData(candles)
+        setCurrentPrice(candles[candles.length - 1]?.close || 0)
+
+        if (chartRef.current?.candlestickSeries) {
+          chartRef.current.candlestickSeries.setData(candles)
+        }
+
+        // Connect WebSocket for real-time updates if enabled
+        if (isRealTimeEnabled || tf.includes("m") || tf.includes("h")) {
+          connectWebSocket(cleanSymbol)
+        }
+      } else {
+        throw new Error("No chart data available")
       }
-
-      setCachedData(cacheKey, data)
-
-      setChartData(data)
-      if (chartRef.current?.candlestickSeries) {
-        chartRef.current.candlestickSeries.setData(data)
-      }
-
-      toast({ title: "Chart Updated", description: `Loaded ${data.length} data points for ${symbol}` })
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Failed to fetch chart data"
-      setError(errorMessage)
+      console.error("[v0] Error fetching chart data:", error)
+      setError(error instanceof Error ? error.message : "Failed to fetch chart data")
 
+      // Show sample data as fallback
       const sampleData = generateSampleData()
       setChartData(sampleData)
       if (chartRef.current?.candlestickSeries) {
         chartRef.current.candlestickSeries.setData(sampleData)
       }
-
-      toast({ title: "Using Sample Data", description: errorMessage, variant: "destructive" })
     } finally {
       setLoading(false)
     }
@@ -585,10 +593,8 @@ export function ChartContainer() {
   const handleSymbolSelect = (selectedSymbol: string) => {
     const cleanedSymbol = validateSymbol(selectedSymbol)
     setSymbol(cleanedSymbol)
-    setTimeout(() => {
-      fetchChartData()
-      fetchSnapshots()
-    }, 100)
+    fetchChartData()
+    fetchSnapshots()
   }
 
   const handleAutoMarkLevels = async (timeframe: "daily" | "weekly" | "monthly") => {
@@ -658,8 +664,165 @@ export function ChartContainer() {
 
   const validateSymbol = (symbol: string): string => symbol.trim().toUpperCase()
 
+  const resetChartView = () => {
+    if (chartRef.current?.chart && chartData.length > 0) {
+      try {
+        // Get the latest candle for centering
+        const latestCandle = chartData[chartData.length - 1]
+        const timeRange = chartData.length > 50 ? 50 : chartData.length
+
+        // Set visible range to show last 50 candles or all available data
+        chartRef.current.chart.timeScale().setVisibleRange({
+          from: chartData[Math.max(0, chartData.length - timeRange)].time,
+          to: latestCandle.time,
+        })
+
+        // Fit content to show all price levels
+        chartRef.current.chart.timeScale().fitContent()
+
+        toast({
+          title: "Chart view reset",
+          description: "Centered on current price range",
+        })
+      } catch (error) {
+        console.error("[v0] Error resetting chart view:", error)
+      }
+    }
+  }
+
+  const connectWebSocket = (symbol: string) => {
+    if (!symbol || !process.env.NEXT_PUBLIC_EODHD_API_KEY) return
+
+    // Close existing connection
+    if (wsConnection) {
+      wsConnection.close()
+      setWsConnection(null)
+    }
+
+    try {
+      let wsUrl = ""
+
+      // Determine WebSocket endpoint based on symbol type
+      if (symbol.endsWith(".US") || symbol.includes("NYSE") || symbol.includes("NASDAQ")) {
+        wsUrl = `wss://ws.eodhistoricaldata.com/ws/us?api_token=${process.env.NEXT_PUBLIC_EODHD_API_KEY}`
+      } else if (symbol.endsWith(".FOREX")) {
+        wsUrl = `wss://ws.eodhistoricaldata.com/ws/forex?api_token=${process.env.NEXT_PUBLIC_EODHD_API_KEY}`
+      } else if (symbol.endsWith(".CC")) {
+        wsUrl = `wss://ws.eodhistoricaldata.com/ws/crypto?api_token=${process.env.NEXT_PUBLIC_EODHD_API_KEY}`
+      } else {
+        // Default to US market
+        wsUrl = `wss://ws.eodhistoricaldata.com/ws/us?api_token=${process.env.NEXT_PUBLIC_EODHD_API_KEY}`
+      }
+
+      const ws = new WebSocket(wsUrl)
+
+      ws.onopen = () => {
+        console.log("[v0] WebSocket connected for", symbol)
+        // Subscribe to symbol
+        ws.send(
+          JSON.stringify({
+            action: "subscribe",
+            symbols: [symbol.replace(/\.(US|FOREX|CC)$/, "")],
+          }),
+        )
+        setIsRealTimeEnabled(true)
+      }
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data)
+          if (data.s === symbol.replace(/\.(US|FOREX|CC)$/, "") && data.p) {
+            // Update current price display
+            setCurrentPrice(data.p)
+
+            // Optionally update the last candle with real-time price
+            if (chartRef.current?.candlestickSeries && chartData.length > 0) {
+              const lastCandle = { ...chartData[chartData.length - 1] }
+              lastCandle.close = data.p
+              lastCandle.high = Math.max(lastCandle.high, data.p)
+              lastCandle.low = Math.min(lastCandle.low, data.p)
+
+              chartRef.current.candlestickSeries.update(lastCandle)
+            }
+          }
+        } catch (error) {
+          console.error("[v0] Error processing WebSocket data:", error)
+        }
+      }
+
+      ws.onerror = (error) => {
+        console.error("[v0] WebSocket error:", error)
+        setIsRealTimeEnabled(false)
+      }
+
+      ws.onclose = () => {
+        console.log("[v0] WebSocket disconnected")
+        setIsRealTimeEnabled(false)
+        setWsConnection(null)
+      }
+
+      setWsConnection(ws)
+    } catch (error) {
+      console.error("[v0] Error connecting WebSocket:", error)
+      setIsRealTimeEnabled(false)
+    }
+  }
+
+  const timeframeOptions = [
+    { value: "1m", label: "1m", realTime: true },
+    { value: "5m", label: "5m", realTime: true },
+    { value: "15m", label: "15m", realTime: true },
+    { value: "30m", label: "30m", realTime: true },
+    { value: "1h", label: "1h", realTime: true },
+    { value: "4h", label: "4h", realTime: false },
+    { value: "1d", label: "1d", realTime: false },
+    { value: "1w", label: "1w", realTime: false },
+    { value: "1M", label: "1M", realTime: false },
+  ]
+
+  const handleTimeframeChange = (newTimeframe: string) => {
+    setSelectedTimeframe(newTimeframe)
+    fetchChartData(newTimeframe)
+
+    // Enable/disable real-time based on timeframe
+    const option = timeframeOptions.find((opt) => opt.value === newTimeframe)
+    if (option?.realTime && !isRealTimeEnabled) {
+      connectWebSocket(symbol)
+    } else if (!option?.realTime && wsConnection) {
+      wsConnection.close()
+    }
+  }
+
   return (
     <div className="space-y-6">
+      <Card>
+        <CardContent className="pt-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-2xl font-bold">{symbol}</h2>
+              <p className="text-sm text-muted-foreground">
+                {chartData.length > 0 && (
+                  <>
+                    Last: ${chartData[chartData.length - 1]?.close?.toFixed(2) || "N/A"} •{chartData.length} data points
+                    •{interval} interval
+                  </>
+                )}
+                {loading && "Loading..."}
+                {error && "Using sample data"}
+              </p>
+            </div>
+            <div className="text-right">
+              <div className="text-sm text-muted-foreground">{new Date(date).toLocaleDateString()}</div>
+              {chartData.length > 0 && (
+                <div className="text-lg font-semibold">
+                  ${chartData[chartData.length - 1]?.close?.toFixed(2) || "N/A"}
+                </div>
+              )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center space-x-2">
@@ -700,8 +863,14 @@ export function ChartContainer() {
               <Input id="date" type="date" value={date} onChange={(e) => setDate(e.target.value)} className="mt-1" />
             </div>
             <div className="flex items-end">
-              <Button onClick={() => fetchChartData()} disabled={loading} className="w-full sm:w-auto">
-                {loading ? "Loading..." : "Load Data"}
+              <Button
+                onClick={() => fetchChartData()}
+                disabled={loading}
+                variant="outline"
+                size="sm"
+                className="w-full sm:w-auto"
+              >
+                {loading ? "Loading..." : "Refresh"}
               </Button>
             </div>
           </div>
@@ -795,8 +964,9 @@ export function ChartContainer() {
                           style={{ backgroundColor: colors[timeframe as keyof typeof colors] }}
                         />
                         <span className="text-xs">
-                          {timeframe.charAt(0).toUpperCase()}: ±{group.levels.upper1.toFixed(2)}/±
-                          {group.levels.upper2.toFixed(2)}
+                          {timeframe.charAt(0).toUpperCase()}: ±
+                          {typeof group.levels.upper1 === "number" ? group.levels.upper1.toFixed(2) : "N/A"}/±
+                          {typeof group.levels.upper2 === "number" ? group.levels.upper2.toFixed(2) : "N/A"}
                         </span>
                       </div>
                     )
@@ -854,6 +1024,44 @@ export function ChartContainer() {
                 Snapshots
               </Button>
             </div>
+          </div>
+
+          <div className="absolute top-4 left-4 z-10 flex items-center gap-2 bg-background/80 backdrop-blur-sm rounded-lg p-2 border">
+            {/* Timeframe selector */}
+            <div className="flex items-center gap-1">
+              {timeframeOptions.map((option) => (
+                <Button
+                  key={option.value}
+                  variant={selectedTimeframe === option.value ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => handleTimeframeChange(option.value)}
+                  className="h-6 px-2 text-xs"
+                >
+                  {option.label}
+                  {option.realTime && <div className="w-1 h-1 bg-green-500 rounded-full ml-1" />}
+                </Button>
+              ))}
+            </div>
+
+            {/* Reset chart view button */}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={resetChartView}
+              className="h-6 px-2 text-xs bg-transparent"
+              title="Reset chart view to current price"
+            >
+              <RotateCcw className="h-3 w-3 mr-1" />
+              Reset View
+            </Button>
+
+            {/* Real-time indicator */}
+            {isRealTimeEnabled && (
+              <div className="flex items-center gap-1 text-xs text-green-600">
+                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+                Live
+              </div>
+            )}
           </div>
 
           <div ref={chartContainerRef} className="w-full min-h-[500px] lg:min-h-[70vh]" />

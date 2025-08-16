@@ -47,92 +47,32 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "EODHD API key not configured" }, { status: 500 })
     }
 
-    let url: string
-    let isAggregated = false
+    let chartData: any[] = []
+    let finalInterval = interval
 
-    const isForex = cleanSymbol.endsWith(".FOREX")
-    const isCrypto = cleanSymbol.endsWith(".CC")
-    const isStock = cleanSymbol.endsWith(".US") || (!isForex && !isCrypto)
-
-    if (interval === "weekly" || interval === "monthly") {
-      // For weekly/monthly, fetch daily data over a longer period
-      const daysBack = interval === "weekly" ? 90 : 365
-      const fromParam = from || new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000).toISOString().split("T")[0]
-      const toParam = to || new Date().toISOString().split("T")[0]
-      url = `https://eodhd.com/api/eod/${cleanSymbol}?from=${fromParam}&to=${toParam}&api_token=${apiKey}&fmt=json`
-      isAggregated = true
-    } else if (interval === "daily") {
-      // Daily data - use EOD endpoint
-      const fromParam = from || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0]
-      const toParam = to || new Date().toISOString().split("T")[0]
-      url = `https://eodhd.com/api/eod/${cleanSymbol}?from=${fromParam}&to=${toParam}&api_token=${apiKey}&fmt=json`
-    } else {
-      // Intraday data - use intraday endpoint with proper interval mapping
-      const intervalMap: Record<string, string> = {
-        "1m": "1m",
-        "5m": "5m",
-        "15m": "15m",
-        "1h": "1h",
+    // Try intraday first if requested
+    if (interval !== "daily" && interval !== "weekly" && interval !== "monthly") {
+      try {
+        chartData = await fetchIntradayData(cleanSymbol, interval, apiKey)
+        console.log("[v0] Intraday data fetched:", chartData.length, "candles")
+      } catch (error) {
+        console.log(
+          "[v0] Intraday failed, falling back to daily:",
+          error instanceof Error ? error.message : "Unknown error",
+        )
+        finalInterval = "daily"
       }
-      const mappedInterval = intervalMap[interval] || "5m"
-      url = `https://eodhd.com/api/intraday/${cleanSymbol}?interval=${mappedInterval}&api_token=${apiKey}&fmt=json`
     }
 
-    console.log("[v0] Fetching from EODHD:", url.replace(apiKey, "***"))
-
-    const response = await fetch(url)
-
-    if (!response.ok) {
-      if (response.status === 404) {
-        return NextResponse.json({ error: `Symbol ${cleanSymbol} not found` }, { status: 404 })
-      }
-      throw new Error(`EODHD API error: ${response.status} ${response.statusText}`)
+    // If intraday failed or daily/weekly/monthly requested, fetch daily data
+    if (chartData.length === 0) {
+      chartData = await fetchDailyData(cleanSymbol, finalInterval, from, to, apiKey)
+      console.log("[v0] Daily/aggregated data fetched:", chartData.length, "candles")
     }
 
-    const data: EODHDCandle[] = await response.json()
-
-    if (!Array.isArray(data) || data.length === 0) {
+    if (chartData.length === 0) {
       return NextResponse.json({ error: `No data available for ${cleanSymbol}` }, { status: 404 })
     }
-
-    let processedData = data
-      .map((candle) => {
-        let time: number
-        if (interval === "daily" || isAggregated) {
-          // For daily data, use date string as Unix timestamp (days since epoch)
-          time = Math.floor(new Date(candle.date + "T00:00:00Z").getTime() / 1000)
-        } else {
-          // For intraday data, convert datetime to Unix timestamp
-          time = Math.floor(new Date(candle.date).getTime() / 1000)
-        }
-
-        return {
-          time,
-          open: Number(candle.open),
-          high: Number(candle.high),
-          low: Number(candle.low),
-          close: Number(candle.close),
-          volume: Number(candle.volume || 0),
-          date: candle.date,
-        }
-      })
-      .filter(
-        (candle) =>
-          !isNaN(candle.time) &&
-          !isNaN(candle.open) &&
-          !isNaN(candle.high) &&
-          !isNaN(candle.low) &&
-          !isNaN(candle.close),
-      )
-      .sort((a, b) => a.time - b.time)
-
-    if (isAggregated) {
-      const aggregated = aggregateCandles(processedData, interval as "weekly" | "monthly")
-      processedData = aggregated
-    }
-
-    // Remove the date field from final output
-    const chartData = processedData.map(({ date, ...candle }) => candle)
 
     console.log("[v0] Processed chart data:", chartData.length, "candles")
 
@@ -150,6 +90,110 @@ export async function GET(request: NextRequest) {
       { status: 500 },
     )
   }
+}
+
+async function fetchIntradayData(cleanSymbol: string, interval: string, apiKey: string): Promise<any[]> {
+  const intervalMap: Record<string, string> = {
+    "1m": "1m",
+    "5m": "5m",
+    "15m": "15m",
+    "1h": "1h",
+  }
+  const mappedInterval = intervalMap[interval] || "5m"
+  const url = `https://eodhd.com/api/intraday/${cleanSymbol}?interval=${mappedInterval}&api_token=${apiKey}&fmt=json`
+
+  console.log("[v0] Fetching intraday from EODHD:", url.replace(apiKey, "***"))
+
+  const response = await fetch(url)
+
+  if (!response.ok) {
+    throw new Error(`EODHD intraday API error: ${response.status} ${response.statusText}`)
+  }
+
+  const data: EODHDCandle[] = await response.json()
+  console.log("[v0] Raw intraday response:", Array.isArray(data) ? `${data.length} items` : typeof data)
+
+  if (!Array.isArray(data) || data.length === 0) {
+    throw new Error(`No intraday data available for ${cleanSymbol}`)
+  }
+
+  return processCandles(data, false)
+}
+
+async function fetchDailyData(
+  cleanSymbol: string,
+  interval: string,
+  from: string | null,
+  to: string | null,
+  apiKey: string,
+): Promise<any[]> {
+  let url: string
+  let isAggregated = false
+
+  if (interval === "weekly" || interval === "monthly") {
+    const daysBack = interval === "weekly" ? 90 : 365
+    const fromParam = from || new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000).toISOString().split("T")[0]
+    const toParam = to || new Date().toISOString().split("T")[0]
+    url = `https://eodhd.com/api/eod/${cleanSymbol}?from=${fromParam}&to=${toParam}&api_token=${apiKey}&fmt=json`
+    isAggregated = true
+  } else {
+    const fromParam = from || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0]
+    const toParam = to || new Date().toISOString().split("T")[0]
+    url = `https://eodhd.com/api/eod/${cleanSymbol}?from=${fromParam}&to=${toParam}&api_token=${apiKey}&fmt=json`
+  }
+
+  console.log("[v0] Fetching daily from EODHD:", url.replace(apiKey, "***"))
+
+  const response = await fetch(url)
+
+  if (!response.ok) {
+    if (response.status === 404) {
+      throw new Error(`Symbol ${cleanSymbol} not found`)
+    }
+    throw new Error(`EODHD daily API error: ${response.status} ${response.statusText}`)
+  }
+
+  const data: EODHDCandle[] = await response.json()
+  console.log("[v0] Raw daily response:", Array.isArray(data) ? `${data.length} items` : typeof data)
+
+  if (!Array.isArray(data) || data.length === 0) {
+    throw new Error(`No daily data available for ${cleanSymbol}`)
+  }
+
+  let processedData = processCandles(data, true)
+
+  if (isAggregated) {
+    processedData = aggregateCandles(processedData, interval as "weekly" | "monthly")
+  }
+
+  return processedData.map(({ date, ...candle }) => candle)
+}
+
+function processCandles(data: EODHDCandle[], isDaily: boolean) {
+  return data
+    .map((candle) => {
+      let time: number
+      if (isDaily) {
+        time = Math.floor(new Date(candle.date + "T00:00:00Z").getTime() / 1000)
+      } else {
+        time = Math.floor(new Date(candle.date).getTime() / 1000)
+      }
+
+      return {
+        time,
+        open: Number(candle.open),
+        high: Number(candle.high),
+        low: Number(candle.low),
+        close: Number(candle.close),
+        volume: Number(candle.volume || 0),
+        date: candle.date,
+      }
+    })
+    .filter(
+      (candle) =>
+        !isNaN(candle.time) && !isNaN(candle.open) && !isNaN(candle.high) && !isNaN(candle.low) && !isNaN(candle.close),
+    )
+    .sort((a, b) => a.time - b.time)
 }
 
 function aggregateCandles(dailyData: any[], interval: "weekly" | "monthly") {
