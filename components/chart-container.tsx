@@ -5,8 +5,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
-import { Search } from "lucide-react"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Search, AlertCircle } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { SymbolSearch } from "@/components/symbol-search"
 
 interface LevelsData {
   upper1: number
@@ -15,11 +18,23 @@ interface LevelsData {
   lower2: number
 }
 
+interface ChartData {
+  time: string | number
+  open: number
+  high: number
+  low: number
+  close: number
+  volume?: number
+}
+
 export function ChartContainer() {
-  const [symbol, setSymbol] = useState("AAPL")
+  const [symbol, setSymbol] = useState("AAPL.US")
   const [date, setDate] = useState(new Date().toISOString().split("T")[0])
+  const [interval, setInterval] = useState("daily")
   const [levels, setLevels] = useState<LevelsData | null>(null)
+  const [chartData, setChartData] = useState<ChartData[]>([])
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const chartContainerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<any>(null)
   const { toast } = useToast()
@@ -38,7 +53,6 @@ export function ChartContainer() {
     }
   }
 
-  // Initialize TradingView chart
   useEffect(() => {
     if (typeof window !== "undefined" && chartContainerRef.current) {
       import("lightweight-charts")
@@ -92,13 +106,10 @@ export function ChartContainer() {
 
             console.log("[v0] Candlestick series created successfully")
 
-            // Sample candlestick data
-            const sampleData = generateSampleData()
-            candlestickSeries.setData(sampleData)
-
             chartRef.current = { chart, candlestickSeries, lineSeries: [], LineSeries }
 
-            // Handle resize
+            fetchChartData()
+
             const handleResize = () => {
               if (chartContainerRef.current && chart) {
                 chart.applyOptions({
@@ -134,15 +145,25 @@ export function ChartContainer() {
     }
   }, [])
 
-  // Fetch levels data
   const fetchLevels = async () => {
     setLoading(true)
     try {
       const response = await fetch(`/api/levels/by-symbol?symbol=${symbol}&date=${date}`)
       if (response.ok) {
         const data = await response.json()
-        setLevels(data)
-        drawLevels(data)
+        const validatedLevels = validateLevelsData(data)
+        if (validatedLevels) {
+          setLevels(validatedLevels)
+          drawLevels(validatedLevels)
+        } else {
+          setLevels(null)
+          clearLevels()
+          toast({
+            title: "Invalid levels data",
+            description: `Levels data for ${symbol} contains invalid values`,
+            variant: "destructive",
+          })
+        }
       } else {
         setLevels(null)
         clearLevels()
@@ -164,21 +185,18 @@ export function ChartContainer() {
     }
   }
 
-  // Draw levels on chart
   const drawLevels = (levelsData: LevelsData) => {
     if (!chartRef.current?.chart || !chartRef.current?.LineSeries) {
       console.log("[v0] Chart or LineSeries not available for drawing levels")
       return
     }
 
-    // Clear existing levels
     clearLevels()
 
     const { chart, LineSeries } = chartRef.current
     const colors = getChartColors()
 
     try {
-      // Add horizontal lines for levels
       const lines = [
         { price: levelsData.upper2, color: colors.level2Color, title: "+2σ" },
         { price: levelsData.upper1, color: colors.level1Color, title: "+1σ" },
@@ -192,7 +210,7 @@ export function ChartContainer() {
         const lineSeries = chart.addSeries(LineSeries, {
           color,
           lineWidth: 2,
-          lineStyle: 1, // Dashed
+          lineStyle: 1,
           title,
           priceLineVisible: true,
           lastValueVisible: true,
@@ -229,15 +247,114 @@ export function ChartContainer() {
     }
   }
 
+  const fetchChartData = async () => {
+    setLoading(true)
+    setError(null)
+
+    try {
+      const params = new URLSearchParams({
+        symbol,
+        interval,
+      })
+
+      if (interval === "daily") {
+        const fromDate = new Date(date)
+        fromDate.setDate(fromDate.getDate() - 30)
+        params.append("from", fromDate.toISOString().split("T")[0])
+        params.append("to", date)
+      }
+
+      console.log("[v0] Fetching chart data with params:", params.toString())
+
+      const response = await fetch(`/api/chart-data?${params}`)
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || `HTTP ${response.status}`)
+      }
+
+      const data: ChartData[] = await response.json()
+
+      if (!data || data.length === 0) {
+        throw new Error(`No chart data available for ${symbol}`)
+      }
+
+      console.log("[v0] Received chart data:", data.length, "points")
+      setChartData(data)
+
+      if (chartRef.current?.candlestickSeries) {
+        chartRef.current.candlestickSeries.setData(data)
+        console.log("[v0] Chart updated with real data")
+      }
+
+      toast({
+        title: "Chart Updated",
+        description: `Loaded ${data.length} data points for ${symbol}`,
+      })
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Failed to fetch chart data"
+      setError(errorMessage)
+      console.error("[v0] Error fetching chart data:", error)
+
+      const sampleData = generateSampleData()
+      setChartData(sampleData)
+      if (chartRef.current?.candlestickSeries) {
+        chartRef.current.candlestickSeries.setData(sampleData)
+        console.log("[v0] Fallback to sample data")
+      }
+
+      toast({
+        title: "Using Sample Data",
+        description: errorMessage,
+        variant: "destructive",
+      })
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const handleSearch = () => {
     if (symbol.trim()) {
+      fetchChartData()
       fetchLevels()
+    }
+  }
+
+  const handleSymbolSelect = (selectedSymbol: string) => {
+    setSymbol(selectedSymbol)
+    setTimeout(() => {
+      fetchChartData()
+      fetchLevels()
+    }, 100)
+  }
+
+  const validateLevelsData = (data: any): LevelsData | null => {
+    if (!data || typeof data !== "object") {
+      return null
+    }
+
+    const { upper1, lower1, upper2, lower2 } = data
+
+    const numUpper1 = Number(upper1)
+    const numLower1 = Number(lower1)
+    const numUpper2 = Number(upper2)
+    const numLower2 = Number(lower2)
+
+    if (isNaN(numUpper1) || isNaN(numLower1) || isNaN(numUpper2) || isNaN(numLower2)) {
+      console.error("[v0] Invalid levels data:", { upper1, lower1, upper2, lower2 })
+      return null
+    }
+
+    return {
+      upper1: numUpper1,
+      lower1: numLower1,
+      upper2: numUpper2,
+      lower2: numLower2,
     }
   }
 
   return (
     <div className="space-y-6">
-      {/* Controls */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center space-x-2">
@@ -249,13 +366,27 @@ export function ChartContainer() {
           <div className="flex flex-col sm:flex-row gap-4">
             <div className="flex-1">
               <Label htmlFor="symbol">Symbol</Label>
-              <Input
-                id="symbol"
-                value={symbol}
-                onChange={(e) => setSymbol(e.target.value.toUpperCase())}
-                placeholder="Enter symbol (e.g., AAPL)"
-                className="mt-1"
-              />
+              <div className="mt-1">
+                <SymbolSearch
+                  onSymbolSelect={handleSymbolSelect}
+                  placeholder="Search symbols (e.g., AAPL, TSLA, NVDA)"
+                />
+              </div>
+              <div className="text-xs text-muted-foreground mt-1">Current: {symbol}</div>
+            </div>
+            <div className="flex-1">
+              <Label htmlFor="interval">Interval</Label>
+              <Select value={interval} onValueChange={setInterval}>
+                <SelectTrigger className="mt-1">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="daily">Daily</SelectItem>
+                  <SelectItem value="5m">5 Minutes</SelectItem>
+                  <SelectItem value="15m">15 Minutes</SelectItem>
+                  <SelectItem value="1h">1 Hour</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
             <div className="flex-1">
               <Label htmlFor="date">Date</Label>
@@ -263,21 +394,29 @@ export function ChartContainer() {
             </div>
             <div className="flex items-end">
               <Button onClick={handleSearch} disabled={loading} className="w-full sm:w-auto">
-                {loading ? "Loading..." : "Load Levels"}
+                {loading ? "Loading..." : "Load Data"}
               </Button>
             </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* Chart */}
+      {error && (
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>
+            {error}. Showing sample data instead.
+            {error.includes("not found") && " Try searching for a different symbol."}
+          </AlertDescription>
+        </Alert>
+      )}
+
       <Card>
         <CardContent className="p-0">
           <div ref={chartContainerRef} className="w-full min-h-[500px] lg:min-h-[70vh]" />
         </CardContent>
       </Card>
 
-      {/* Levels Info */}
       {levels && (
         <Card>
           <CardHeader>
@@ -287,19 +426,27 @@ export function ChartContainer() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div className="text-center p-3 rounded-lg bg-muted">
                 <div className="text-sm text-muted-foreground">+2σ</div>
-                <div className="text-lg font-bold">{levels.upper2.toFixed(2)}</div>
+                <div className="text-lg font-bold">
+                  {typeof levels.upper2 === "number" ? levels.upper2.toFixed(2) : "N/A"}
+                </div>
               </div>
               <div className="text-center p-3 rounded-lg bg-muted">
                 <div className="text-sm text-muted-foreground">+1σ</div>
-                <div className="text-lg font-bold">{levels.upper1.toFixed(2)}</div>
+                <div className="text-lg font-bold">
+                  {typeof levels.upper1 === "number" ? levels.upper1.toFixed(2) : "N/A"}
+                </div>
               </div>
               <div className="text-center p-3 rounded-lg bg-muted">
                 <div className="text-sm text-muted-foreground">-1σ</div>
-                <div className="text-lg font-bold">{levels.lower1.toFixed(2)}</div>
+                <div className="text-lg font-bold">
+                  {typeof levels.lower1 === "number" ? levels.lower1.toFixed(2) : "N/A"}
+                </div>
               </div>
               <div className="text-center p-3 rounded-lg bg-muted">
                 <div className="text-sm text-muted-foreground">-2σ</div>
-                <div className="text-lg font-bold">{levels.lower2.toFixed(2)}</div>
+                <div className="text-lg font-bold">
+                  {typeof levels.lower2 === "number" ? levels.lower2.toFixed(2) : "N/A"}
+                </div>
               </div>
             </div>
           </CardContent>
@@ -309,7 +456,6 @@ export function ChartContainer() {
   )
 }
 
-// Generate sample candlestick data
 function generateSampleData() {
   const data = []
   let price = 150
@@ -326,7 +472,7 @@ function generateSampleData() {
     const low = Math.min(open, close) - Math.random() * 2
 
     data.push({
-      time: date.toISOString().split("T")[0],
+      time: Math.floor(date.getTime() / 1000),
       open,
       high,
       low,

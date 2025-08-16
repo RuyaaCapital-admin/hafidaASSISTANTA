@@ -8,6 +8,7 @@ import { BarChart3, MessageSquare, Settings } from "lucide-react"
 
 const navigation = [
   { name: "Chart", href: "/chart", icon: BarChart3 },
+  { name: "Expected Move", href: "/expected-move", icon: BarChart3 },
   { name: "Agent", href: "/agent", icon: MessageSquare },
   { name: "Admin", href: "/admin/uploads", icon: Settings },
 ]
