@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -14,6 +14,7 @@ import { useToast } from "@/hooks/use-toast"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { SymbolSearch } from "@/components/symbol-search"
 import { markLevels } from "@/lib/mark-levels"
+import { TIMEFRAMES, isIntraday, getPollInterval, isMarketHours } from "@/lib/timeframe"
 
 interface LevelsData {
   upper1: number
@@ -72,6 +73,10 @@ export function ChartContainer() {
   const chartContainerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<any>(null)
   const { toast } = useToast()
+
+  const [pollController, setPollController] = useState<AbortController | null>(null)
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
+  const [isLive, setIsLive] = useState(false)
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -167,12 +172,152 @@ export function ChartContainer() {
     }
   }
 
+  const applyTheme = useCallback((theme: string) => {
+    if (!chartRef.current?.chart) return
+
+    const colors = getChartColors(theme === "dark")
+
+    chartRef.current.chart.applyOptions({
+      layout: {
+        background: { color: theme === "dark" ? "#0b0f1a" : "#ffffff" },
+        textColor: theme === "dark" ? "#E7EAF3" : "#111827",
+      },
+      rightPriceScale: {
+        borderVisible: false,
+        textColor: theme === "dark" ? "#E7EAF3" : "#111827",
+        scaleMargins: { top: 0.1, bottom: 0.1 },
+      },
+      leftPriceScale: { borderVisible: false },
+      timeScale: {
+        borderVisible: false,
+        textColor: theme === "dark" ? "#E7EAF3" : "#111827",
+      },
+      grid: {
+        vertLines: { color: theme === "dark" ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.06)" },
+        horzLines: { color: theme === "dark" ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.06)" },
+      },
+      crosshair: {
+        vertLine: { color: theme === "dark" ? "#5563ff" : "#3741ff" },
+        horzLine: { color: theme === "dark" ? "#5563ff" : "#3741ff" },
+      },
+    })
+
+    // Force sizing tick
+    chartRef.current.chart.timeScale().fitContent()
+    chartRef.current.chart.resize(
+      chartContainerRef.current?.clientWidth || 800,
+      chartContainerRef.current?.clientHeight || 500,
+    )
+  }, [])
+
+  const loadSeries = useCallback(
+    async (newSymbol: string, newResolution: string) => {
+      try {
+        // Cancel existing poll
+        if (pollController) {
+          pollController.abort()
+          setPollController(null)
+        }
+
+        setIsLive(false)
+
+        // Fetch initial data
+        const response = await fetch(`/api/chart-data?symbol=${newSymbol}&resolution=${newResolution}`)
+        if (!response.ok) throw new Error(`Failed to fetch data: ${response.status}`)
+
+        const data = await response.json()
+        if (!data.candles || data.candles.length === 0) {
+          throw new Error("No chart data available")
+        }
+
+        // Update chart series
+        if (chartRef.current?.candlestickSeries) {
+          chartRef.current.candlestickSeries.setData(data.candles)
+
+          // Update header with current price
+          if (data.last) {
+            setCurrentPrice(data.last)
+            setLastUpdated(new Date())
+          }
+
+          // Fit content and emit data-ready event
+          chartRef.current.chart.timeScale().fitContent()
+          requestAnimationFrame(() => {
+            if (chartRef.current?.chart && chartContainerRef.current) {
+              chartRef.current.chart.resize(
+                chartContainerRef.current.clientWidth,
+                chartContainerRef.current.clientHeight,
+              )
+            }
+          })
+        }
+
+        // Start polling for live updates
+        const newController = new AbortController()
+        setPollController(newController)
+
+        const pollInterval = getPollInterval(newResolution)
+        const isMarketOpen = isMarketHours(newSymbol)
+        const shouldPoll = isIntraday(newResolution) && isMarketOpen
+
+        if (shouldPoll) {
+          setIsLive(true)
+          startPolling(newSymbol, newResolution, newController, pollInterval)
+        }
+      } catch (error) {
+        console.error("[v0] Error loading series:", error)
+        throw error
+      }
+    },
+    [pollController],
+  )
+
+  const startPolling = useCallback(
+    (symbol: string, resolution: string, controller: AbortController, interval: number) => {
+      const poll = async () => {
+        if (controller.signal.aborted) return
+
+        try {
+          const response = await fetch(`/api/chart-data?symbol=${symbol}&resolution=${resolution}`, {
+            signal: controller.signal,
+          })
+
+          if (!response.ok) throw new Error(`Poll failed: ${response.status}`)
+
+          const data = await response.json()
+          if (data.candles && data.candles.length > 0 && chartRef.current?.candlestickSeries) {
+            // Update with incremental data
+            const lastCandle = data.candles[data.candles.length - 1]
+            chartRef.current.candlestickSeries.update(lastCandle)
+
+            if (data.last) {
+              setCurrentPrice(data.last)
+              setLastUpdated(new Date())
+            }
+          }
+        } catch (error) {
+          if (!controller.signal.aborted) {
+            console.error("[v0] Polling error:", error)
+          }
+        }
+
+        // Schedule next poll
+        if (!controller.signal.aborted) {
+          setTimeout(poll, interval * 1000)
+        }
+      }
+
+      // Start polling after initial delay
+      setTimeout(poll, interval * 1000)
+    },
+    [],
+  )
+
   useEffect(() => {
     if (typeof window !== "undefined" && chartContainerRef.current && !chartRef.current) {
       import("lightweight-charts").then(({ createChart, CandlestickSeries, LineSeries }) => {
         try {
           console.log("[v0] Initializing chart...")
-          const colors = getChartColors(isDarkMode)
 
           if (!chartContainerRef.current || chartRef.current) return
 
@@ -183,34 +328,38 @@ export function ChartContainer() {
             width: containerWidth,
             height: containerHeight,
             layout: {
-              background: { color: colors.background },
-              textColor: colors.textColor,
+              background: { color: "transparent" },
+              textColor: "#e4e4e7",
             },
             grid: {
-              vertLines: { color: "rgba(42,46,57,0)" }, // disabled vertical lines
-              horzLines: { color: "rgba(42,46,57,0.2)" }, // subtle horizontal lines
+              vertLines: { color: "rgba(42,46,57,0)" },
+              horzLines: { color: "rgba(42,46,57,0.2)" },
             },
             crosshair: { mode: 1 },
-            rightPriceScale: { borderColor: colors.borderColor },
+            rightPriceScale: { borderColor: "#27272a" },
             timeScale: {
-              borderColor: colors.borderColor,
+              borderColor: "#27272a",
               timeVisible: true,
               secondsVisible: false,
             },
           })
 
           const candlestickSeries = chart.addSeries(CandlestickSeries, {
-            upColor: colors.upColor,
-            downColor: colors.downColor,
-            borderDownColor: colors.downColor,
-            borderUpColor: colors.upColor,
-            wickDownColor: colors.downColor,
-            wickUpColor: colors.upColor,
+            upColor: "#22c55e",
+            downColor: "#ef4444",
+            borderDownColor: "#ef4444",
+            borderUpColor: "#22c55e",
+            wickDownColor: "#ef4444",
+            wickUpColor: "#22c55e",
           })
 
           chartRef.current = { chart, candlestickSeries, LineSeries }
 
-          fetchChartData()
+          // Apply initial theme
+          applyTheme(isDarkMode ? "dark" : "light")
+
+          // Load initial data
+          loadSeries(symbol, interval)
 
           const handleResize = () => {
             if (chartContainerRef.current && chart) {
@@ -239,41 +388,8 @@ export function ChartContainer() {
   }, [])
 
   useEffect(() => {
-    if (chartRef.current?.chart) {
-      const colors = getChartColors(isDarkMode)
-      chartRef.current.chart.applyOptions({
-        layout: {
-          background: { color: colors.background },
-          textColor: colors.textColor,
-        },
-        grid: {
-          vertLines: { color: "rgba(42,46,57,0)" },
-          horzLines: { color: "rgba(42,46,57,0.2)" },
-        },
-        rightPriceScale: {
-          borderColor: colors.borderColor,
-          textColor: colors.textColor, // Fix dark mode price text
-          scaleMargins: { top: 0.1, bottom: 0.1 },
-        },
-        timeScale: {
-          borderColor: colors.borderColor,
-          textColor: colors.textColor, // Fix dark mode time text
-          rightOffset: 12,
-          barSpacing: 3,
-          fixLeftEdge: false,
-          lockVisibleTimeRangeOnResize: true,
-          rightBarStaysOnScroll: true,
-          borderVisible: false,
-          visible: true,
-          timeVisible: true,
-          secondsVisible: false,
-        },
-      })
-
-      // Force chart redraw to apply new colors
-      chartRef.current.chart.timeScale().fitContent()
-    }
-  }, [isDarkMode])
+    applyTheme(isDarkMode ? "dark" : "light")
+  }, [isDarkMode, applyTheme])
 
   const drawLevels = (timeframe: "daily" | "weekly" | "monthly", levelsData: LevelsData, isSnapshot = false) => {
     if (!chartRef.current?.chart || !chartRef.current?.LineSeries) return
@@ -543,61 +659,10 @@ export function ChartContainer() {
     fetchSnapshots()
   }, [symbol])
 
-  const fetchChartData = async (timeframe?: string) => {
-    if (!symbol) return
-
-    const tf = timeframe || interval
-    setLoading(true)
-    setError(null)
-
-    try {
-      console.log(`[v0] Processing symbol: ${symbol} -> cleaned: ${validateSymbol(symbol)}`)
-
-      const cleanSymbol = validateSymbol(symbol)
-      const params = new URLSearchParams({
-        symbol: cleanSymbol,
-        interval: tf,
-      })
-
-      const response = await fetch(`/api/chart-data?${params}`)
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.error || `HTTP ${response.status}`)
-      }
-
-      const candles = Array.isArray(data) ? data : data.candles || []
-
-      if (candles.length > 0) {
-        console.log(`[v0] Processed chart data: ${candles.length} candles`)
-        setChartData(candles)
-        setCurrentPrice(candles[candles.length - 1]?.close || 0)
-
-        if (chartRef.current?.candlestickSeries) {
-          chartRef.current.candlestickSeries.setData(candles)
-        }
-      } else {
-        throw new Error("No chart data available")
-      }
-    } catch (error) {
-      console.error("[v0] Error fetching chart data:", error)
-      setError(error instanceof Error ? error.message : "Failed to fetch chart data")
-
-      // Show sample data as fallback
-      const sampleData = generateSampleData()
-      setChartData(sampleData)
-      if (chartRef.current?.candlestickSeries) {
-        chartRef.current.candlestickSeries.setData(sampleData)
-      }
-    } finally {
-      setLoading(false)
-    }
-  }
-
   const handleSymbolSelect = (selectedSymbol: string) => {
     const cleanedSymbol = validateSymbol(selectedSymbol)
     setSymbol(cleanedSymbol)
-    fetchChartData()
+    loadSeries(cleanedSymbol, interval)
     fetchSnapshots()
   }
 
@@ -668,37 +733,27 @@ export function ChartContainer() {
 
   const validateSymbol = (symbol: string): string => symbol.trim().toUpperCase()
 
-  const resetChartView = () => {
-    if (chartRef.current?.chart && chartData.length > 0) {
-      try {
-        // Get the latest candle for centering
-        const latestCandle = chartData[chartData.length - 1]
-        const currentPrice = latestCandle.close
+  const handleResetView = () => {
+    if (chartRef.current?.chart && currentPrice) {
+      const chart = chartRef.current.chart
+      const timeScale = chart.timeScale()
 
-        // Calculate price range around current price (±5% buffer)
-        const priceBuffer = currentPrice * 0.05
-        const minPrice = currentPrice - priceBuffer
-        const maxPrice = currentPrice + priceBuffer
+      // Get current visible range
+      const visibleRange = timeScale.getVisibleRange()
+      if (visibleRange) {
+        // Calculate 5% buffer around current price
+        const buffer = currentPrice * 0.05
 
-        // Set visible range to show last 50 candles or all available data
-        const timeRange = chartData.length > 50 ? 50 : chartData.length
-        chartRef.current.chart.timeScale().setVisibleRange({
-          from: chartData[Math.max(0, chartData.length - timeRange)].time,
-          to: latestCandle.time,
+        // Set price scale to show current price with buffer
+        chart.priceScale("right").applyOptions({
+          scaleMargins: { top: 0.1, bottom: 0.1 },
         })
 
-        // Set price scale to focus on current price area
-        chartRef.current.chart.priceScale("right").setVisibleRange({
-          from: minPrice,
-          to: maxPrice,
-        })
+        // Fit content to show recent data
+        timeScale.fitContent()
 
-        toast({
-          title: "Chart view reset",
-          description: `Centered on current price $${currentPrice.toFixed(2)}`,
-        })
-      } catch (error) {
-        console.error("[v0] Error resetting chart view:", error)
+        // Scroll to show latest data
+        timeScale.scrollToRealTime()
       }
     }
   }
@@ -710,24 +765,9 @@ export function ChartContainer() {
     return
   }
 
-  const timeframeOptions = [
-    { value: "1m", label: "1m", realTime: true },
-    { value: "5m", label: "5m", realTime: true },
-    { value: "15m", label: "15m", realTime: true },
-    { value: "30m", label: "30m", realTime: true },
-    { value: "1h", label: "1h", realTime: true },
-    { value: "4h", label: "4h", realTime: false },
-    { value: "1d", label: "1d", realTime: false },
-    { value: "1w", label: "1w", realTime: false },
-    { value: "1M", label: "1M", realTime: false },
-  ]
-
   const handleTimeframeChange = (newTimeframe: string) => {
     setTimeframe(newTimeframe)
-    fetchChartData(newTimeframe)
-
-    // Real-time functionality will be implemented via server-side API routes
-    console.log("[v0] Real-time updates temporarily disabled for security")
+    loadSeries(symbol, newTimeframe)
   }
 
   useEffect(() => {
@@ -861,7 +901,7 @@ export function ChartContainer() {
             </div>
             <div className="flex items-end">
               <Button
-                onClick={() => fetchChartData()}
+                onClick={() => loadSeries(symbol, interval)}
                 disabled={loading}
                 variant="outline"
                 size="sm"
@@ -925,7 +965,7 @@ export function ChartContainer() {
                 )}
               </div>
               <div className="text-xs text-muted-foreground">
-                {chartData.length} candles • {timeframe}
+                {chartData.length} candles • {interval}
               </div>
             </div>
           </div>
@@ -936,7 +976,7 @@ export function ChartContainer() {
               {/* Left: Timeframe selector and reset */}
               <div className="flex items-center gap-2 flex-wrap">
                 <div className="flex items-center gap-1">
-                  {timeframeOptions.map((option) => (
+                  {TIMEFRAMES.map((option) => (
                     <Button
                       key={option.value}
                       variant={timeframe === option.value ? "default" : "outline"}
@@ -953,7 +993,7 @@ export function ChartContainer() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={resetChartView}
+                  onClick={handleResetView}
                   className="h-7 px-2 text-xs bg-transparent"
                   title="Reset chart view to current price"
                 >

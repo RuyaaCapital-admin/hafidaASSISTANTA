@@ -53,32 +53,61 @@ function detectFunctionCall(message: string): {
 
   const lowerMessage = message.toLowerCase().trim()
 
-  // Switch symbol patterns
-  if (lowerMessage.match(/^(switch to|load|show)\s+([a-z0-9]+)/i)) {
-    const match = lowerMessage.match(/^(switch to|load|show)\s+([a-z0-9]+)/i)
-    return { type: "switch", symbol: match?.[2]?.toUpperCase() }
-  }
+  const pricePatterns = [
+    /^(?:price\s+([A-Za-z.-]+)|([A-Za-z.-]+)\s+price|what'?s\s+([A-Za-z.-]+)\s+price|([A-Za-z.-]+)\s+now)$/i,
+    /^(?:get\s+price\s+for\s+([A-Za-z.-]+)|([A-Za-z.-]+)\s+current\s+price)$/i,
+  ]
 
-  // Price query patterns
-  if (lowerMessage.match(/^(price|what'?s)\s+([a-z0-9]+)/i)) {
-    const match = lowerMessage.match(/^(price|what'?s)\s+([a-z0-9]+)/i)
-    return { type: "price", symbol: match?.[2]?.toUpperCase() }
-  }
-
-  // Mark levels patterns
-  if (lowerMessage.match(/^mark\s+([a-z0-9]+)\s*(daily|weekly|monthly)?/i)) {
-    const match = lowerMessage.match(/^mark\s+([a-z0-9]+)\s*(daily|weekly|monthly)?/i)
-    return {
-      type: "mark_levels",
-      symbol: match?.[1]?.toUpperCase(),
-      timeframe: match?.[2] || "daily",
+  for (const pattern of pricePatterns) {
+    const match = lowerMessage.match(pattern)
+    if (match) {
+      const symbol = match[1] || match[2] || match[3] || match[4]
+      return { type: "price", symbol: symbol?.toUpperCase() }
     }
   }
 
-  // Analyze patterns
-  if (lowerMessage.match(/^(analyze|what do you think of)\s+([a-z0-9]+)/i)) {
-    const match = lowerMessage.match(/^(analyze|what do you think of)\s+([a-z0-9]+)/i)
-    return { type: "analyze", symbol: match?.[2]?.toUpperCase() }
+  const switchPatterns = [
+    /^(?:switch|load|show)\s+(?:to\s+)?([A-Za-z.-]+)$/i,
+    /^(?:change\s+to\s+([A-Za-z.-]+)|go\s+to\s+([A-Za-z.-]+))$/i,
+  ]
+
+  for (const pattern of switchPatterns) {
+    const match = lowerMessage.match(pattern)
+    if (match) {
+      const symbol = match[1] || match[2]
+      return { type: "switch", symbol: symbol?.toUpperCase() }
+    }
+  }
+
+  const markPatterns = [
+    /^(?:mark|draw)\s+(?:the\s+)?(?:(daily|weekly|monthly)\s+)?levels(?:\s+for\s+([A-Za-z.-]+))?$/i,
+    /^(?:([A-Za-z.-]+)\s+)?(?:(daily|weekly|monthly)\s+)?levels$/i,
+  ]
+
+  for (const pattern of markPatterns) {
+    const match = lowerMessage.match(pattern)
+    if (match) {
+      const symbol = match[2] || match[1]
+      const timeframe = match[1] || match[2] || "daily"
+      return {
+        type: "mark_levels",
+        symbol: symbol?.toUpperCase(),
+        timeframe: timeframe.toLowerCase(),
+      }
+    }
+  }
+
+  const analyzePatterns = [
+    /^(?:analy[sz]e)\s+(?:the\s+)?([A-Za-z.-]+)?(?:\s+(daily|weekly|monthly))?$/i,
+    /^(?:what\s+do\s+you\s+think\s+(?:of\s+|about\s+)([A-Za-z.-]+))$/i,
+  ]
+
+  for (const pattern of analyzePatterns) {
+    const match = lowerMessage.match(pattern)
+    if (match) {
+      const symbol = match[1]
+      return { type: "analyze", symbol: symbol?.toUpperCase() }
+    }
   }
 
   return { type: "chat" }
@@ -402,7 +431,7 @@ export async function POST(request: NextRequest) {
               }
 
               const response = await fetch(
-                `${request.headers.get("origin") || process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000"}/api/chart-data?symbol=${resolved.provider}&interval=${functionCall.timeframe || "daily"}`,
+                `${request.headers.get("origin") || process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000"}/api/chart-data?symbol=${resolved.provider}&resolution=${functionCall.timeframe || "daily"}`,
               )
 
               if (!response.ok) throw new Error(`Failed to fetch chart data`)

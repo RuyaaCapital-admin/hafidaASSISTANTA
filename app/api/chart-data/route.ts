@@ -1,9 +1,9 @@
 export const runtime = "nodejs"
 
 import { type NextRequest, NextResponse } from "next/server"
+import { TIMEFRAME_CONFIGS, isIntraday } from "@/lib/timeframe"
 
-// Simple in-memory cache with 1-minute expiration
-const cache = new Map<string, { data: any; timestamp: number }>()
+const cache = new Map<string, { data: any; timestamp: number; ttl: number }>()
 const CACHE_DURATION = 60 * 1000 // 1 minute
 
 interface EODHDCandle {
@@ -19,9 +19,9 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
     const symbol = searchParams.get("symbol")
+    const resolution = searchParams.get("resolution") || "daily"
     const from = searchParams.get("from")
     const to = searchParams.get("to")
-    const interval = searchParams.get("interval") || "daily"
 
     if (!symbol) {
       return NextResponse.json({ error: "Missing required parameter: symbol" }, { status: 400 })
@@ -35,10 +35,11 @@ export async function GET(request: NextRequest) {
 
     console.log("[v0] Processing symbol:", symbol, "-> cleaned:", cleanSymbol)
 
-    // Check cache first
-    const cacheKey = `${cleanSymbol}-${from}-${to}-${interval}`
+    const cacheKey = `${cleanSymbol}-${resolution}-${from}-${to}`
     const cached = cache.get(cacheKey)
-    if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
+    const ttl = isIntraday(resolution) ? 15 * 1000 : 60 * 1000 // 15s for intraday, 60s for EOD
+
+    if (cached && Date.now() - cached.timestamp < cached.ttl) {
       return NextResponse.json(cached.data)
     }
 
@@ -47,39 +48,57 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "EODHD API key not configured" }, { status: 500 })
     }
 
-    let chartData: any[] = []
-    let finalInterval = interval
+    const timeframeConfig = TIMEFRAME_CONFIGS[resolution]
+    if (!timeframeConfig) {
+      return NextResponse.json({ error: `Unsupported resolution: ${resolution}` }, { status: 400 })
+    }
 
-    // Try intraday first if requested
-    if (interval !== "daily" && interval !== "weekly" && interval !== "monthly") {
+    let chartData: any[] = []
+    let lastPrice: number | undefined
+
+    if (timeframeConfig.eodhd.type === "intraday") {
       try {
-        chartData = await fetchIntradayData(cleanSymbol, interval, apiKey)
+        const result = await fetchIntradayData(cleanSymbol, timeframeConfig.eodhd.interval!, apiKey)
+        chartData = result.candles
+        lastPrice = result.last
         console.log("[v0] Intraday data fetched:", chartData.length, "candles")
       } catch (error) {
         console.log(
           "[v0] Intraday failed, falling back to daily:",
           error instanceof Error ? error.message : "Unknown error",
         )
-        finalInterval = "daily"
+        // Fallback to daily data
+        const result = await fetchDailyData(cleanSymbol, "d", from, to, apiKey)
+        chartData = result.candles
+        lastPrice = result.last
       }
-    }
-
-    // If intraday failed or daily/weekly/monthly requested, fetch daily data
-    if (chartData.length === 0) {
-      chartData = await fetchDailyData(cleanSymbol, finalInterval, from, to, apiKey)
-      console.log("[v0] Daily/aggregated data fetched:", chartData.length, "candles")
+    } else {
+      const result = await fetchDailyData(cleanSymbol, timeframeConfig.eodhd.period!, from, to, apiKey)
+      chartData = result.candles
+      lastPrice = result.last
+      console.log("[v0] EOD data fetched:", chartData.length, "candles")
     }
 
     if (chartData.length === 0) {
       return NextResponse.json({ error: `No data available for ${cleanSymbol}` }, { status: 404 })
     }
 
+    const responseData = {
+      candles: chartData,
+      last: lastPrice,
+      meta: {
+        symbol: cleanSymbol,
+        resolution,
+        from: from || "auto",
+        to: to || "auto",
+      },
+    }
+
     console.log("[v0] Processed chart data:", chartData.length, "candles")
 
-    // Cache the result
-    cache.set(cacheKey, { data: chartData, timestamp: Date.now() })
+    cache.set(cacheKey, { data: responseData, timestamp: Date.now(), ttl })
 
-    return NextResponse.json(chartData)
+    return NextResponse.json(responseData)
   } catch (error) {
     console.error("Error fetching chart data:", error)
     return NextResponse.json(
@@ -92,15 +111,12 @@ export async function GET(request: NextRequest) {
   }
 }
 
-async function fetchIntradayData(cleanSymbol: string, interval: string, apiKey: string): Promise<any[]> {
-  const intervalMap: Record<string, string> = {
-    "1m": "1m",
-    "5m": "5m",
-    "15m": "15m",
-    "1h": "1h",
-  }
-  const mappedInterval = intervalMap[interval] || "5m"
-  const url = `https://eodhd.com/api/intraday/${cleanSymbol}?interval=${mappedInterval}&api_token=${apiKey}&fmt=json`
+async function fetchIntradayData(
+  cleanSymbol: string,
+  interval: string,
+  apiKey: string,
+): Promise<{ candles: any[]; last?: number }> {
+  const url = `https://eodhd.com/api/intraday/${cleanSymbol}?interval=${interval}&api_token=${apiKey}&fmt=json`
 
   console.log("[v0] Fetching intraday from EODHD:", url.replace(apiKey, "***"))
 
@@ -124,30 +140,23 @@ async function fetchIntradayData(cleanSymbol: string, interval: string, apiKey: 
     throw new Error(`Failed to process intraday data for ${cleanSymbol}`)
   }
 
-  return processedData
+  const lastPrice = processedData.length > 0 ? processedData[processedData.length - 1].close : undefined
+
+  return { candles: processedData, last: lastPrice }
 }
 
 async function fetchDailyData(
   cleanSymbol: string,
-  interval: string,
+  period: string,
   from: string | null,
   to: string | null,
   apiKey: string,
-): Promise<any[]> {
-  let url: string
-  let isAggregated = false
+): Promise<{ candles: any[]; last?: number }> {
+  const daysBack = period === "w" ? 90 : period === "m" ? 365 : 30
+  const fromParam = from || new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000).toISOString().split("T")[0]
+  const toParam = to || new Date().toISOString().split("T")[0]
 
-  if (interval === "weekly" || interval === "monthly") {
-    const daysBack = interval === "weekly" ? 90 : 365
-    const fromParam = from || new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000).toISOString().split("T")[0]
-    const toParam = to || new Date().toISOString().split("T")[0]
-    url = `https://eodhd.com/api/eod/${cleanSymbol}?from=${fromParam}&to=${toParam}&api_token=${apiKey}&fmt=json`
-    isAggregated = true
-  } else {
-    const fromParam = from || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0]
-    const toParam = to || new Date().toISOString().split("T")[0]
-    url = `https://eodhd.com/api/eod/${cleanSymbol}?from=${fromParam}&to=${toParam}&api_token=${apiKey}&fmt=json`
-  }
+  const url = `https://eodhd.com/api/eod/${cleanSymbol}?from=${fromParam}&to=${toParam}&period=${period}&api_token=${apiKey}&fmt=json`
 
   console.log("[v0] Fetching daily from EODHD:", url.replace(apiKey, "***"))
 
@@ -167,13 +176,10 @@ async function fetchDailyData(
     throw new Error(`No daily data available for ${cleanSymbol}`)
   }
 
-  let processedData = processCandles(data, true)
+  const processedData = processCandles(data, true)
+  const lastPrice = processedData.length > 0 ? processedData[processedData.length - 1].close : undefined
 
-  if (isAggregated) {
-    processedData = aggregateCandles(processedData, interval as "weekly" | "monthly")
-  }
-
-  return processedData.map(({ date, ...candle }) => candle)
+  return { candles: processedData.map(({ date, ...candle }) => candle), last: lastPrice }
 }
 
 function processIntradayCandles(data: any[]) {
