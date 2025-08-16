@@ -3,7 +3,7 @@ export const runtime = "nodejs"
 import { type NextRequest, NextResponse } from "next/server"
 import OpenAI from "openai"
 import { markLevels } from "@/lib/mark-levels"
-import { priceCache } from "@/lib/cache"
+import { resolveSymbol } from "@/lib/symbol-resolver"
 
 function createOpenAIClient(): OpenAI | null {
   try {
@@ -34,6 +34,7 @@ function createOpenAIClient(): OpenAI | null {
 
     return new OpenAI({
       apiKey: trimmedKey,
+      dangerouslyAllowBrowser: true,
     })
   } catch (error) {
     console.error("[v0] Error creating OpenAI client:", error)
@@ -85,13 +86,25 @@ function detectFunctionCall(message: string): {
 
 async function handleSwitchSymbol(symbol: string) {
   try {
+    const resolved = resolveSymbol(symbol)
+    if (resolved.error) {
+      return {
+        success: false,
+        type: "function" as const,
+        message: `Unsupported symbol: ${symbol}`,
+        symbols: [],
+        levels: [],
+        error: resolved.error,
+      }
+    }
+
     return {
       success: true,
       type: "function" as const,
-      message: `Switched to ${symbol}`,
-      symbols: [symbol],
+      message: `Switched to ${resolved.user} (${resolved.assetClass})`,
+      symbols: [resolved.provider],
       levels: [],
-      clientEvent: { type: "chart:switch", data: { symbol } },
+      clientEvent: { type: "chart:switch", data: { symbol: resolved.provider } },
     }
   } catch (error) {
     return {
@@ -107,15 +120,26 @@ async function handleSwitchSymbol(symbol: string) {
 
 async function handleGetPrice(symbol: string) {
   try {
-    const cacheKey = `${symbol}:daily`
+    const resolved = resolveSymbol(symbol)
+    if (resolved.error) {
+      return {
+        success: false,
+        type: "function" as const,
+        message: `Unsupported symbol: ${symbol}`,
+        symbols: [],
+        levels: [],
+        error: resolved.error,
+      }
+    }
 
-    const data = await priceCache.getOrFetch(cacheKey, async () => {
-      const response = await fetch(
-        `${process.env.VERCEL_URL || "http://localhost:3000"}/api/chart-data?symbol=${symbol}&interval=daily`,
-      )
-      if (!response.ok) throw new Error(`Failed to fetch price data: ${response.status}`)
-      return response.json()
+    const response = await fetch(`/api/chart-data?symbol=${resolved.provider}&interval=daily`, {
+      method: "GET",
+      headers: { "Content-Type": "application/json" },
     })
+
+    if (!response.ok) throw new Error(`Failed to fetch price data: ${response.status}`)
+
+    const data = await response.json()
 
     if (data && data.length > 0) {
       const lastCandle = data[data.length - 1]
@@ -124,10 +148,10 @@ async function handleGetPrice(symbol: string) {
       return {
         success: true,
         type: "function" as const,
-        message: `${symbol} current price: $${price}`,
-        symbols: [symbol],
+        message: `${resolved.user} current price: $${price.toFixed(2)}`,
+        symbols: [resolved.provider],
         levels: [],
-        clientEvent: { type: "chart:updateHeader", data: { symbol, price } },
+        clientEvent: { type: "chart:updateHeader", data: { symbol: resolved.provider, price } },
       }
     } else {
       throw new Error("No price data available")
@@ -146,15 +170,27 @@ async function handleGetPrice(symbol: string) {
 
 async function handleMarkLevels(symbol: string, timeframe = "daily") {
   try {
-    const levelsResult = await markLevels(symbol, timeframe)
+    const resolved = resolveSymbol(symbol)
+    if (resolved.error) {
+      return {
+        success: false,
+        type: "function" as const,
+        message: `Unsupported symbol: ${symbol}`,
+        symbols: [],
+        levels: [],
+        error: resolved.error,
+      }
+    }
+
+    const levelsResult = await markLevels(resolved.provider, timeframe)
 
     return {
       success: levelsResult.success,
       type: "function" as const,
-      message: `${symbol} ${timeframe} levels ${levelsResult.success ? "updated" : "drawn on chart"}`,
-      symbols: [symbol],
+      message: `${resolved.user} ${timeframe} levels ${levelsResult.success ? "updated" : "drawn on chart"}`,
+      symbols: [resolved.provider],
       levels: levelsResult.success ? ["Levels marked"] : [],
-      clientEvent: { type: "chart:drawLevels", data: { symbol, timeframe } },
+      clientEvent: { type: "chart:drawLevels", data: { symbol: resolved.provider, timeframe } },
       error: levelsResult.success ? undefined : "Database not set up - levels shown on chart only",
     }
   } catch (error) {
@@ -171,15 +207,26 @@ async function handleMarkLevels(symbol: string, timeframe = "daily") {
 
 async function handleAnalyze(symbol: string) {
   try {
-    // Get recent price data
-    const cacheKey = `${symbol}:daily`
-    const priceData = await priceCache.getOrFetch(cacheKey, async () => {
-      const response = await fetch(
-        `${process.env.VERCEL_URL || "http://localhost:3000"}/api/chart-data?symbol=${symbol}&interval=daily`,
-      )
-      if (!response.ok) throw new Error(`Failed to fetch price data: ${response.status}`)
-      return response.json()
+    const resolved = resolveSymbol(symbol)
+    if (resolved.error) {
+      return {
+        success: false,
+        type: "function" as const,
+        message: `Unsupported symbol: ${symbol}`,
+        symbols: [],
+        levels: [],
+        error: resolved.error,
+      }
+    }
+
+    const response = await fetch(`/api/chart-data?symbol=${resolved.provider}&interval=daily`, {
+      method: "GET",
+      headers: { "Content-Type": "application/json" },
     })
+
+    if (!response.ok) throw new Error(`Failed to fetch price data: ${response.status}`)
+
+    const priceData = await response.json()
 
     if (!priceData || priceData.length === 0) {
       throw new Error("No price data available for analysis")
@@ -188,24 +235,24 @@ async function handleAnalyze(symbol: string) {
     const lastCandle = priceData[priceData.length - 1]
     const prevCandle = priceData[priceData.length - 2]
 
-    let analysis = `${symbol} Analysis:\n`
-    analysis += `Current: $${lastCandle.close}\n`
+    let analysis = `${resolved.user} Analysis:\n`
+    analysis += `Current: $${lastCandle.close.toFixed(2)}\n`
 
     if (prevCandle) {
       const change = (((lastCandle.close - prevCandle.close) / prevCandle.close) * 100).toFixed(2)
       analysis += `Change: ${change > 0 ? "+" : ""}${change}%\n`
     }
 
-    analysis += `Range: $${lastCandle.low} - $${lastCandle.high}\n`
+    analysis += `Range: $${lastCandle.low.toFixed(2)} - $${lastCandle.high.toFixed(2)}\n`
     analysis += `Volume: ${lastCandle.volume?.toLocaleString() || "N/A"}`
 
     return {
       success: true,
       type: "function" as const,
       message: analysis,
-      symbols: [symbol],
+      symbols: [resolved.provider],
       levels: [],
-      clientEvent: { type: "chart:switch", data: { symbol } },
+      clientEvent: { type: "chart:switch", data: { symbol: resolved.provider } },
     }
   } catch (error) {
     return {

@@ -41,6 +41,33 @@ export function AgentChat() {
   const messagesContainerRef = useRef<HTMLDivElement>(null)
   const { toast } = useToast()
 
+  useEffect(() => {
+    const handleChartSwitch = (event: CustomEvent) => {
+      console.log("[v0] Chart switch event received:", event.detail)
+      // Chart will handle the symbol switch
+    }
+
+    const handleChartUpdate = (event: CustomEvent) => {
+      console.log("[v0] Chart update event received:", event.detail)
+      // Chart will handle the price update
+    }
+
+    const handleDrawLevels = (event: CustomEvent) => {
+      console.log("[v0] Draw levels event received:", event.detail)
+      // Chart will handle drawing levels
+    }
+
+    window.addEventListener("chart:switch", handleChartSwitch as EventListener)
+    window.addEventListener("chart:updateHeader", handleChartUpdate as EventListener)
+    window.addEventListener("chart:drawLevels", handleDrawLevels as EventListener)
+
+    return () => {
+      window.removeEventListener("chart:switch", handleChartSwitch as EventListener)
+      window.removeEventListener("chart:updateHeader", handleChartUpdate as EventListener)
+      window.removeEventListener("chart:drawLevels", handleDrawLevels as EventListener)
+    }
+  }, [])
+
   const scrollToBottom = () => {
     if (messagesContainerRef.current) {
       messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight
@@ -84,6 +111,8 @@ export function AgentChat() {
     setLoading(true)
 
     try {
+      console.log("[v0] Sending request to /api/ingest...")
+
       const formData = new FormData()
       if (file) {
         formData.append("file", file)
@@ -97,11 +126,16 @@ export function AgentChat() {
         body: formData,
       })
 
+      console.log("[v0] API response status:", response.status)
+
       if (!response.ok) {
+        const errorText = await response.text()
+        console.error("[v0] API error response:", errorText)
         throw new Error(`HTTP error! status: ${response.status}`)
       }
 
       const result: AgentResponse = await response.json()
+      console.log("[v0] API response data:", result)
 
       let responseContent = result.message
 
@@ -127,7 +161,7 @@ export function AgentChat() {
       setMessages((prev) => [...prev, assistantMessage])
 
       if (result.clientEvent) {
-        // Emit custom events that the chart can listen to
+        console.log("[v0] Emitting client event:", result.clientEvent)
         window.dispatchEvent(new CustomEvent(result.clientEvent.type, { detail: result.clientEvent.data }))
       }
 

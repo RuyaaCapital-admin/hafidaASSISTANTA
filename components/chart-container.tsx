@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
-import { Search, AlertCircle, Target, Save, Eye, EyeOff, RotateCcw, ChevronRight, ChevronDown } from "lucide-react"
+import { Search, AlertCircle, Target, Save, RotateCcw } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { SymbolSearch } from "@/components/symbol-search"
@@ -251,14 +251,25 @@ export function ChartContainer() {
         },
         rightPriceScale: {
           borderColor: colors.borderColor,
-          textColor: colors.textColor, // Explicitly set price scale text color
+          textColor: colors.textColor, // Fix dark mode price text
+          scaleMargins: { top: 0.1, bottom: 0.1 },
         },
         timeScale: {
           borderColor: colors.borderColor,
-          textColor: colors.textColor, // Explicitly set time scale text color
+          textColor: colors.textColor, // Fix dark mode time text
+          rightOffset: 12,
+          barSpacing: 3,
+          fixLeftEdge: false,
+          lockVisibleTimeRangeOnResize: true,
+          rightBarStaysOnScroll: true,
+          borderVisible: false,
+          visible: true,
+          timeVisible: true,
+          secondsVisible: false,
         },
       })
 
+      // Force chart redraw to apply new colors
       chartRef.current.chart.timeScale().fitContent()
     }
   }, [isDarkMode])
@@ -832,163 +843,160 @@ export function ChartContainer() {
 
       <Card>
         <CardContent className="p-0 relative">
-          <div className="absolute top-4 left-4 right-4 z-10 flex items-center justify-between gap-4 bg-background/90 backdrop-blur-sm rounded-lg p-2 border">
-            {/* Left side: Timeframe selector and reset button */}
-            <div className="flex items-center gap-2">
-              <div className="flex items-center gap-1">
-                {timeframeOptions.map((option) => (
-                  <Button
-                    key={option.value}
-                    variant={timeframe === option.value ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => handleTimeframeChange(option.value)}
-                    className="h-6 px-2 text-xs"
-                  >
-                    {option.label}
-                    {option.realTime && <div className="w-1 h-1 bg-green-500 rounded-full ml-1" />}
-                  </Button>
-                ))}
+          {/* Symbol header with current price */}
+          <div className="absolute top-2 left-4 right-4 z-20 bg-background/95 backdrop-blur-sm rounded-lg p-3 border shadow-sm">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <h3 className="text-lg font-semibold">{symbol}</h3>
+                {chartData.length > 0 && (
+                  <div className="text-sm text-muted-foreground">
+                    ${chartData[chartData.length - 1]?.close?.toFixed(2) || "N/A"}
+                  </div>
+                )}
               </div>
+              <div className="text-xs text-muted-foreground">
+                {chartData.length} candles • {timeframe}
+              </div>
+            </div>
+          </div>
 
-              <div className="border-l pl-2">
+          {/* Main controls bar - positioned lower to avoid overlap */}
+          <div className="absolute top-16 left-4 right-4 z-10 bg-background/90 backdrop-blur-sm rounded-lg p-2 border">
+            <div className="flex items-center justify-between gap-4 flex-wrap">
+              {/* Left: Timeframe selector and reset */}
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex items-center gap-1">
+                  {timeframeOptions.map((option) => (
+                    <Button
+                      key={option.value}
+                      variant={timeframe === option.value ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => handleTimeframeChange(option.value)}
+                      className="h-7 px-2 text-xs"
+                    >
+                      {option.label}
+                      {option.realTime && <div className="w-1 h-1 bg-green-500 rounded-full ml-1" />}
+                    </Button>
+                  ))}
+                </div>
+
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={resetChartView}
-                  className="h-6 px-2 text-xs bg-transparent"
+                  className="h-7 px-2 text-xs bg-transparent"
                   title="Reset chart view to current price"
                 >
                   <RotateCcw className="h-3 w-3 mr-1" />
                   Reset
                 </Button>
               </div>
-            </div>
 
-            {/* Right side: Level controls, zones, and save options */}
-            <div className="flex items-center gap-2">
-              {/* Level visibility toggles */}
-              <div className="flex items-center gap-1">
-                {(["daily", "weekly", "monthly"] as const).map((timeframe) => {
-                  const groupKey = `levels:${timeframe}`
-                  const group = levelGroups[groupKey]
-                  const colors = getChartColors()
-                  const isActive = group?.visible
-                  const isFocused = focusMode === timeframe
+              {/* Right: Level controls and options */}
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* Level toggles */}
+                <div className="flex items-center gap-1">
+                  {(["daily", "weekly", "monthly"] as const).map((tf) => {
+                    const groupKey = `levels:${tf}`
+                    const group = levelGroups[groupKey]
+                    const colors = getChartColors()
+                    const isActive = group?.visible
 
-                  return (
-                    <div key={timeframe} className="flex items-center gap-1">
+                    return (
                       <Button
+                        key={tf}
                         variant={isActive ? "default" : "outline"}
                         size="sm"
-                        onClick={() => toggleTimeframeVisibility(timeframe)}
-                        className="h-6 px-2 text-xs"
-                        style={isActive ? { backgroundColor: colors[timeframe], borderColor: colors[timeframe] } : {}}
+                        onClick={() => toggleTimeframeVisibility(tf)}
+                        className="h-7 px-2 text-xs"
+                        style={isActive ? { backgroundColor: colors[tf], borderColor: colors[tf] } : {}}
                       >
-                        <div className="w-2 h-2 rounded-full mr-1" style={{ backgroundColor: colors[timeframe] }} />
-                        {timeframe.charAt(0).toUpperCase()}
+                        <div className="w-2 h-2 rounded-full mr-1" style={{ backgroundColor: colors[tf] }} />
+                        {tf.charAt(0).toUpperCase()}
                       </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => toggleFocusMode(timeframe)}
-                        className="h-6 w-6 p-0"
-                      >
-                        {isFocused ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                    )
+                  })}
+                </div>
+
+                {/* Zones and save controls */}
+                <div className="flex items-center gap-2">
+                  <Switch checked={showZones} onCheckedChange={setShowZones} className="scale-75" />
+                  <span className="text-xs">Zones</span>
+
+                  <Dialog open={saveDialogOpen} onOpenChange={setSaveDialogOpen}>
+                    <DialogTrigger asChild>
+                      <Button variant="outline" size="sm" className="h-7 px-2 text-xs bg-transparent">
+                        <Save className="h-3 w-3 mr-1" />
+                        Save
                       </Button>
-                    </div>
-                  )
-                })}
-              </div>
-
-              {/* Zones toggle */}
-              <div className="flex items-center gap-2 border-l pl-2">
-                <Label htmlFor="zones-toggle" className="text-xs">
-                  Zones
-                </Label>
-                <Switch id="zones-toggle" checked={showZones} onCheckedChange={setShowZones} className="scale-75" />
-              </div>
-
-              {/* Save and snapshots */}
-              <div className="flex items-center gap-2 border-l pl-2">
-                <Dialog open={saveDialogOpen} onOpenChange={setSaveDialogOpen}>
-                  <DialogTrigger asChild>
-                    <Button variant="outline" size="sm" className="h-6 px-2 text-xs bg-transparent">
-                      <Save className="h-3 w-3 mr-1" />
-                      Save
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent>
-                    <DialogHeader>
-                      <DialogTitle>Save Levels Snapshot</DialogTitle>
-                    </DialogHeader>
-                    <div className="space-y-4">
-                      <div>
-                        <Label htmlFor="snapshot-name">Snapshot Name *</Label>
-                        <Input
-                          id="snapshot-name"
-                          value={snapshotName}
-                          onChange={(e) => setSnapshotName(e.target.value)}
-                          placeholder="e.g., TSLA Aug levels"
-                        />
+                    </DialogTrigger>
+                    <DialogContent>
+                      <DialogHeader>
+                        <DialogTitle>Save Levels Snapshot</DialogTitle>
+                      </DialogHeader>
+                      <div className="space-y-4">
+                        <div>
+                          <Label htmlFor="snapshot-name">Snapshot Name *</Label>
+                          <Input
+                            id="snapshot-name"
+                            value={snapshotName}
+                            onChange={(e) => setSnapshotName(e.target.value)}
+                            placeholder="e.g., TSLA Aug levels"
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="snapshot-note">Note (optional)</Label>
+                          <Textarea
+                            id="snapshot-note"
+                            value={snapshotNote}
+                            onChange={(e) => setSnapshotNote(e.target.value)}
+                            placeholder="Optional description..."
+                          />
+                        </div>
+                        <Button onClick={saveSnapshot} className="w-full">
+                          Save Snapshot
+                        </Button>
                       </div>
-                      <div>
-                        <Label htmlFor="snapshot-note">Note (optional)</Label>
-                        <Textarea
-                          id="snapshot-note"
-                          value={snapshotNote}
-                          onChange={(e) => setSnapshotNote(e.target.value)}
-                          placeholder="Optional description..."
-                        />
-                      </div>
-                      <Button onClick={saveSnapshot} className="w-full">
-                        Save Snapshot
-                      </Button>
-                    </div>
-                  </DialogContent>
-                </Dialog>
-
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setShowSnapshots(!showSnapshots)}
-                  className="h-6 px-2 text-xs"
-                >
-                  {showSnapshots ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-                  Snapshots
-                </Button>
+                    </DialogContent>
+                  </Dialog>
+                </div>
               </div>
             </div>
           </div>
 
-          {Object.entries(levelGroups).filter(
-            ([key, group]) => key.startsWith("levels:") && !key.includes("snapshot") && group.visible,
-          ).length > 0 && (
-            <div className="absolute top-16 left-4 right-4 z-10 bg-background/80 backdrop-blur-sm rounded-lg p-2 border">
-              <div className="flex items-center justify-center gap-4 text-xs">
-                {Object.entries(levelGroups)
-                  .filter(([key, group]) => key.startsWith("levels:") && !key.includes("snapshot") && group.visible)
-                  .map(([key, group]) => {
-                    const timeframe = key.split(":")[1]
-                    const colors = getChartColors()
-                    return (
-                      <div key={key} className="flex items-center gap-1">
-                        <div
-                          className="w-2 h-2 rounded-full"
-                          style={{ backgroundColor: colors[timeframe as keyof typeof colors] }}
-                        />
-                        <span className="text-xs">
-                          {timeframe.charAt(0).toUpperCase()}: ±
-                          {typeof group.levels.upper1 === "number" ? group.levels.upper1.toFixed(2) : "N/A"}/±
-                          {typeof group.levels.upper2 === "number" ? group.levels.upper2.toFixed(2) : "N/A"}
-                        </span>
-                      </div>
-                    )
-                  })}
+          {/* Chart container with proper spacing for controls */}
+          <div
+            ref={chartContainerRef}
+            className="w-full h-[600px] pt-24" // Add top padding for controls
+            style={{ minHeight: "600px" }}
+          />
+
+          {/* Level values display - only when levels are visible */}
+          {Object.values(levelGroups).some((group) => group.visible && group.levels) && (
+            <div className="absolute bottom-4 left-4 right-4 z-10 bg-background/90 backdrop-blur-sm rounded-lg p-2 border">
+              <div className="text-xs space-y-1">
+                {Object.entries(levelGroups).map(([key, group]) => {
+                  if (!group.visible || !group.levels) return null
+                  const timeframe = key.split(":")[1]
+                  const colors = getChartColors()
+                  return (
+                    <div key={key} className="flex items-center gap-2">
+                      <div
+                        className="w-2 h-2 rounded-full"
+                        style={{ backgroundColor: colors[timeframe as keyof typeof colors] }}
+                      />
+                      <span className="font-medium">{timeframe}:</span>
+                      <span>
+                        {Object.entries(group.levels)
+                          .map(([levelKey, levelValue]) => `$${levelValue.toFixed(2)}`)
+                          .join(", ")}
+                      </span>
+                    </div>
+                  )
+                })}
               </div>
             </div>
           )}
-
-          <div ref={chartContainerRef} className="w-full min-h-[500px] lg:min-h-[70vh]" />
         </CardContent>
       </Card>
 
