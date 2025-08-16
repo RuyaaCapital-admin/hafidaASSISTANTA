@@ -324,23 +324,41 @@ export function ChartContainer() {
           const containerWidth = chartContainerRef.current.clientWidth || 800
           const containerHeight = Math.max(500, window.innerHeight * 0.7)
 
+          // Detect theme immediately on initialization
+          const currentTheme = isDarkMode ? "dark" : "light"
+          const backgroundColor = currentTheme === "dark" ? "#0b0f1a" : "#ffffff"
+          const textColor = currentTheme === "dark" ? "#E7EAF3" : "#111827"
+          const gridColor = currentTheme === "dark" ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.06)"
+          const borderColor = currentTheme === "dark" ? "#27272a" : "#e5e7eb"
+
           const chart = createChart(chartContainerRef.current, {
             width: containerWidth,
             height: containerHeight,
             layout: {
-              background: { color: "transparent" },
-              textColor: "#e4e4e7",
+              background: { color: backgroundColor },
+              textColor: textColor,
             },
             grid: {
               vertLines: { color: "rgba(42,46,57,0)" },
-              horzLines: { color: "rgba(42,46,57,0.2)" },
+              horzLines: { color: gridColor },
             },
-            crosshair: { mode: 1 },
-            rightPriceScale: { borderColor: "#27272a" },
+            crosshair: {
+              mode: 1,
+              vertLine: { color: currentTheme === "dark" ? "#5563ff" : "#3741ff" },
+              horzLine: { color: currentTheme === "dark" ? "#5563ff" : "#3741ff" },
+            },
+            rightPriceScale: {
+              borderColor: borderColor,
+              textColor: textColor,
+              borderVisible: false,
+              scaleMargins: { top: 0.1, bottom: 0.1 },
+            },
             timeScale: {
-              borderColor: "#27272a",
+              borderColor: borderColor,
+              textColor: textColor,
               timeVisible: true,
               secondsVisible: false,
+              borderVisible: false,
             },
           })
 
@@ -354,9 +372,6 @@ export function ChartContainer() {
           })
 
           chartRef.current = { chart, candlestickSeries, LineSeries }
-
-          // Apply initial theme
-          applyTheme(isDarkMode ? "dark" : "light")
 
           // Load initial data
           loadSeries(symbol, interval)
