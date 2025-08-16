@@ -6,7 +6,10 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Search, AlertCircle, Target } from "lucide-react"
+import { Switch } from "@/components/ui/switch"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Textarea } from "@/components/ui/textarea"
+import { Search, AlertCircle, Target, Save, Eye, EyeOff, RotateCcw, ChevronRight, ChevronDown } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { SymbolSearch } from "@/components/symbol-search"
@@ -28,236 +31,423 @@ interface ChartData {
   volume?: number
 }
 
+interface LevelGroup {
+  timeframe: "daily" | "weekly" | "monthly"
+  levels: LevelsData
+  visible: boolean
+  lineSeries: any[]
+}
+
+interface Snapshot {
+  id: number
+  snapshot_name: string
+  note: string
+  timeframes: string[]
+  levels_data: any
+  created_at: string
+}
+
 export function ChartContainer() {
   const [symbol, setSymbol] = useState("AAPL.US")
   const [date, setDate] = useState(new Date().toISOString().split("T")[0])
   const [interval, setInterval] = useState("daily")
-  const [levels, setLevels] = useState<LevelsData | null>(null)
   const [chartData, setChartData] = useState<ChartData[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [autoMarkLoading, setAutoMarkLoading] = useState(false)
+
+  const [levelGroups, setLevelGroups] = useState<Record<string, LevelGroup>>({})
+  const [showZones, setShowZones] = useState(false)
+  const [focusMode, setFocusMode] = useState<string | null>(null)
+
+  const [snapshots, setSnapshots] = useState<Snapshot[]>([])
+  const [showSnapshots, setShowSnapshots] = useState(false)
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false)
+  const [snapshotName, setSnapshotName] = useState("")
+  const [snapshotNote, setSnapshotNote] = useState("")
+
   const chartContainerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<any>(null)
   const { toast } = useToast()
 
+  useEffect(() => {
+    const savedPrefs = localStorage.getItem(`chart-prefs-${symbol}`)
+    if (savedPrefs) {
+      const prefs = JSON.parse(savedPrefs)
+      setShowZones(prefs.showZones || false)
+      // Restore visibility states
+      setLevelGroups((prev) => {
+        const updated = { ...prev }
+        Object.keys(updated).forEach((key) => {
+          if (prefs.visibility && prefs.visibility[key] !== undefined) {
+            updated[key].visible = prefs.visibility[key]
+          }
+        })
+        return updated
+      })
+    }
+  }, [symbol])
+
+  const savePreferences = () => {
+    const visibility: Record<string, boolean> = {}
+    Object.entries(levelGroups).forEach(([key, group]) => {
+      visibility[key] = group.visible
+    })
+
+    localStorage.setItem(
+      `chart-prefs-${symbol}`,
+      JSON.stringify({
+        showZones,
+        visibility,
+      }),
+    )
+  }
+
+  useEffect(() => {
+    savePreferences()
+  }, [levelGroups, showZones, symbol])
+
   const getChartColors = () => {
     const isDark = document.documentElement.classList.contains("dark")
-
     return {
       background: "transparent",
       textColor: isDark ? "#e4e4e7" : "#18181b",
       borderColor: isDark ? "#27272a" : "#e4e4e7",
       upColor: "#22c55e",
       downColor: "#ef4444",
-      level1Color: "#3b82f6",
-      level2Color: "#f59e0b",
+      daily: "#3B82F6", // blue
+      weekly: "#10B981", // green
+      monthly: "#8B5CF6", // purple
+    }
+  }
+
+  const getLineStyle = (timeframe: string) => {
+    switch (timeframe) {
+      case "daily":
+        return 2 // dashed
+      case "weekly":
+        return 0 // solid
+      case "monthly":
+        return 1 // dotted
+      default:
+        return 0
     }
   }
 
   useEffect(() => {
     if (typeof window !== "undefined" && chartContainerRef.current) {
-      import("lightweight-charts")
-        .then(({ createChart, CandlestickSeries, LineSeries }) => {
-          try {
-            console.log("[v0] Initializing chart...")
-            const colors = getChartColors()
+      import("lightweight-charts").then(({ createChart, CandlestickSeries, LineSeries }) => {
+        try {
+          console.log("[v0] Initializing chart...")
+          const colors = getChartColors()
 
-            if (!chartContainerRef.current) {
-              console.log("[v0] Chart container ref is null")
-              return
+          if (!chartContainerRef.current) return
+
+          const containerWidth = chartContainerRef.current.clientWidth || 800
+          const containerHeight = Math.max(500, window.innerHeight * 0.7)
+
+          const chart = createChart(chartContainerRef.current, {
+            width: containerWidth,
+            height: containerHeight,
+            layout: {
+              background: { color: colors.background },
+              textColor: colors.textColor,
+            },
+            grid: {
+              vertLines: { color: colors.borderColor },
+              horzLines: { color: colors.borderColor },
+            },
+            crosshair: { mode: 1 },
+            rightPriceScale: { borderColor: colors.borderColor },
+            timeScale: {
+              borderColor: colors.borderColor,
+              timeVisible: true,
+              secondsVisible: false,
+            },
+          })
+
+          const candlestickSeries = chart.addSeries(CandlestickSeries, {
+            upColor: colors.upColor,
+            downColor: colors.downColor,
+            borderDownColor: colors.downColor,
+            borderUpColor: colors.upColor,
+            wickDownColor: colors.downColor,
+            wickUpColor: colors.upColor,
+          })
+
+          chartRef.current = { chart, candlestickSeries, LineSeries }
+          fetchChartData()
+
+          const handleResize = () => {
+            if (chartContainerRef.current && chart) {
+              chart.applyOptions({ width: chartContainerRef.current.clientWidth })
             }
-
-            const containerWidth = chartContainerRef.current.clientWidth || 800
-            const containerHeight = Math.max(500, window.innerHeight * 0.7)
-
-            const chart = createChart(chartContainerRef.current, {
-              width: containerWidth,
-              height: containerHeight,
-              layout: {
-                background: { color: colors.background },
-                textColor: colors.textColor,
-              },
-              grid: {
-                vertLines: { color: colors.borderColor },
-                horzLines: { color: colors.borderColor },
-              },
-              crosshair: {
-                mode: 1,
-              },
-              rightPriceScale: {
-                borderColor: colors.borderColor,
-              },
-              timeScale: {
-                borderColor: colors.borderColor,
-                timeVisible: true,
-                secondsVisible: false,
-              },
-            })
-
-            console.log("[v0] Chart created successfully")
-
-            const candlestickSeries = chart.addSeries(CandlestickSeries, {
-              upColor: colors.upColor,
-              downColor: colors.downColor,
-              borderDownColor: colors.downColor,
-              borderUpColor: colors.upColor,
-              wickDownColor: colors.downColor,
-              wickUpColor: colors.upColor,
-            })
-
-            console.log("[v0] Candlestick series created successfully")
-
-            chartRef.current = { chart, candlestickSeries, lineSeries: [], LineSeries }
-
-            fetchChartData()
-
-            const handleResize = () => {
-              if (chartContainerRef.current && chart) {
-                chart.applyOptions({
-                  width: chartContainerRef.current.clientWidth,
-                })
-              }
-            }
-
-            window.addEventListener("resize", handleResize)
-
-            return () => {
-              console.log("[v0] Cleaning up chart...")
-              window.removeEventListener("resize", handleResize)
-              if (chart) {
-                chart.remove()
-              }
-            }
-          } catch (error) {
-            console.error("[v0] Error initializing chart:", error)
           }
-        })
-        .catch((error) => {
-          console.error("[v0] Error importing lightweight-charts:", error)
-        })
+
+          window.addEventListener("resize", handleResize)
+          return () => {
+            window.removeEventListener("resize", handleResize)
+            if (chart) chart.remove()
+          }
+        } catch (error) {
+          console.error("[v0] Error initializing chart:", error)
+        }
+      })
     }
 
     return () => {
       if (chartRef.current?.chart) {
-        console.log("[v0] Removing chart on cleanup")
         chartRef.current.chart.remove()
         chartRef.current = null
       }
     }
   }, [])
 
-  const fetchLevels = async () => {
-    setLoading(true)
-    try {
-      const response = await fetch(`/api/levels/by-symbol?symbol=${symbol}&date=${date}`)
-      if (response.ok) {
-        const data = await response.json()
-        const validatedLevels = validateLevelsData(data)
-        if (validatedLevels) {
-          setLevels(validatedLevels)
-          drawLevels(validatedLevels)
-        } else {
-          setLevels(null)
-          clearLevels()
-          toast({
-            title: "Invalid levels data",
-            description: `Levels data for ${symbol} contains invalid values`,
-            variant: "destructive",
-          })
-        }
-      } else {
-        setLevels(null)
-        clearLevels()
-        toast({
-          title: "No levels found",
-          description: `No levels data found for ${symbol} on ${date}`,
-          variant: "destructive",
-        })
-      }
-    } catch (error) {
-      console.error("Error fetching levels:", error)
-      toast({
-        title: "Error",
-        description: "Failed to fetch levels data",
-        variant: "destructive",
-      })
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const drawLevels = (levelsData: LevelsData) => {
-    if (!chartRef.current?.chart || !chartRef.current?.LineSeries) {
-      console.log("[v0] Chart or LineSeries not available for drawing levels")
-      return
-    }
-
-    clearLevels()
+  const drawLevels = (timeframe: "daily" | "weekly" | "monthly", levelsData: LevelsData, isSnapshot = false) => {
+    if (!chartRef.current?.chart || !chartRef.current?.LineSeries) return
 
     const { chart, LineSeries } = chartRef.current
     const colors = getChartColors()
+    const color = colors[timeframe]
+    const lineStyle = getLineStyle(timeframe)
+    const suffix = isSnapshot ? "·S" : ""
 
-    try {
-      const lines = [
-        { price: levelsData.upper2, color: colors.level2Color, title: "+2σ" },
-        { price: levelsData.upper1, color: colors.level1Color, title: "+1σ" },
-        { price: levelsData.lower1, color: colors.level1Color, title: "-1σ" },
-        { price: levelsData.lower2, color: colors.level2Color, title: "-2σ" },
-      ]
+    const groupKey = `levels:${timeframe}${isSnapshot ? ":snapshot" : ""}`
+    if (levelGroups[groupKey]) {
+      levelGroups[groupKey].lineSeries.forEach((series: any) => {
+        chart.removeSeries(series)
+      })
+    }
 
-      const newLineSeries: any[] = []
+    const newLineSeries: any[] = []
+    const lines = [
+      { price: levelsData.upper2, title: `+2σ·${timeframe.charAt(0).toUpperCase()}${suffix}` },
+      { price: levelsData.upper1, title: `+1σ·${timeframe.charAt(0).toUpperCase()}${suffix}` },
+      { price: levelsData.lower1, title: `-1σ·${timeframe.charAt(0).toUpperCase()}${suffix}` },
+      { price: levelsData.lower2, title: `-2σ·${timeframe.charAt(0).toUpperCase()}${suffix}` },
+    ]
 
-      lines.forEach(({ price, color, title }) => {
-        const lineSeries = chart.addSeries(LineSeries, {
-          color,
-          lineWidth: 2,
-          lineStyle: 1,
-          title,
-          priceLineVisible: true,
-          lastValueVisible: true,
-        })
+    const badgePositions = calculateBadgePositions(lines.map((l) => l.price))
 
-        lineSeries.setData([
-          { time: "2024-01-01", value: price },
-          { time: "2024-12-31", value: price },
-        ])
-
-        newLineSeries.push(lineSeries)
+    lines.forEach(({ price, title }, index) => {
+      const lineSeries = chart.addSeries(LineSeries, {
+        color,
+        lineWidth: 1, // thin lines
+        lineStyle,
+        title,
+        priceLineVisible: true,
+        lastValueVisible: false, // Remove mid-chart text
+        priceFormat: {
+          type: "price",
+          precision: 2,
+          minMove: 0.01,
+        },
       })
 
-      chartRef.current.lineSeries = newLineSeries
-      console.log("[v0] Levels drawn successfully")
-    } catch (error) {
-      console.error("[v0] Error drawing levels:", error)
+      lineSeries.setData([
+        { time: "2024-01-01", value: price },
+        { time: "2024-12-31", value: price },
+      ])
+
+      newLineSeries.push(lineSeries)
+    })
+
+    if (showZones && !isSnapshot) {
+      const zoneSeries = chart.addSeries(LineSeries, {
+        color,
+        lineWidth: 0,
+        topColor: `${color}26`, // 15% opacity
+        bottomColor: `${color}26`,
+        lineVisible: false,
+        crosshairMarkerVisible: false,
+      })
+
+      // Create zone between +1σ and -1σ
+      zoneSeries.setData([
+        { time: "2024-01-01", value: levelsData.upper1 },
+        { time: "2024-12-31", value: levelsData.lower1 },
+      ])
+
+      newLineSeries.push(zoneSeries)
+    }
+
+    setLevelGroups((prev) => ({
+      ...prev,
+      [groupKey]: {
+        timeframe,
+        levels: levelsData,
+        visible: true,
+        lineSeries: newLineSeries,
+      },
+    }))
+  }
+
+  const calculateBadgePositions = (prices: number[]): number[] => {
+    const sorted = [...prices].sort((a, b) => b - a)
+    const positions: number[] = []
+    const minSpacing = 8 // 8px minimum spacing
+
+    sorted.forEach((price, index) => {
+      let position = price
+
+      // Check for overlaps with previous positions
+      for (let i = 0; i < positions.length; i++) {
+        if (Math.abs(position - positions[i]) < minSpacing) {
+          position = positions[i] + (position > positions[i] ? minSpacing : -minSpacing)
+        }
+      }
+
+      positions.push(position)
+    })
+
+    return positions
+  }
+
+  const toggleTimeframeVisibility = (timeframe: string) => {
+    setLevelGroups((prev) => {
+      const updated = { ...prev }
+      const groupKey = `levels:${timeframe}`
+
+      if (updated[groupKey]) {
+        updated[groupKey].visible = !updated[groupKey].visible
+
+        // Show/hide series
+        updated[groupKey].lineSeries.forEach((series: any) => {
+          if (updated[groupKey].visible) {
+            series.applyOptions({ visible: true })
+          } else {
+            series.applyOptions({ visible: false })
+          }
+        })
+      }
+
+      return updated
+    })
+  }
+
+  const toggleFocusMode = (timeframe: string) => {
+    if (focusMode === timeframe) {
+      // Restore all
+      setFocusMode(null)
+      Object.keys(levelGroups).forEach((key) => {
+        levelGroups[key].lineSeries.forEach((series: any) => {
+          series.applyOptions({ visible: levelGroups[key].visible })
+        })
+      })
+    } else {
+      // Hide others
+      setFocusMode(timeframe)
+      Object.keys(levelGroups).forEach((key) => {
+        const isTarget = key.includes(timeframe)
+        levelGroups[key].lineSeries.forEach((series: any) => {
+          series.applyOptions({ visible: isTarget && levelGroups[key].visible })
+        })
+      })
     }
   }
 
-  const clearLevels = () => {
-    if (chartRef.current?.lineSeries && chartRef.current?.chart) {
-      try {
-        chartRef.current.lineSeries.forEach((series: any) => {
-          if (typeof chartRef.current.chart.removeSeries === "function") {
-            chartRef.current.chart.removeSeries(series)
-          }
-        })
-        chartRef.current.lineSeries = []
-        console.log("[v0] Levels cleared successfully")
-      } catch (error) {
-        console.error("[v0] Error clearing levels:", error)
+  const clearAllOverlays = () => {
+    Object.values(levelGroups).forEach((group) => {
+      group.lineSeries.forEach((series: any) => {
+        chartRef.current?.chart?.removeSeries(series)
+      })
+    })
+    setLevelGroups({})
+    toast({ title: "Overlays cleared", description: "All level overlays have been removed" })
+  }
+
+  const saveSnapshot = async () => {
+    if (!snapshotName.trim()) {
+      toast({ title: "Error", description: "Snapshot name is required", variant: "destructive" })
+      return
+    }
+
+    try {
+      const activeTimeframes = Object.keys(levelGroups)
+        .filter((key) => key.startsWith("levels:") && !key.includes("snapshot"))
+        .map((key) => key.split(":")[1])
+
+      const levelsData: Record<string, LevelsData> = {}
+      activeTimeframes.forEach((tf) => {
+        const group = levelGroups[`levels:${tf}`]
+        if (group) {
+          levelsData[tf] = group.levels
+        }
+      })
+
+      const response = await fetch("/api/level-sets/save-snapshot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          symbol,
+          snapshotName,
+          note: snapshotNote,
+          timeframes: activeTimeframes,
+          levelsData,
+        }),
+      })
+
+      if (response.ok) {
+        toast({ title: "Snapshot saved", description: `"${snapshotName}" saved successfully` })
+        setSaveDialogOpen(false)
+        setSnapshotName("")
+        setSnapshotNote("")
+        fetchSnapshots()
+      } else {
+        throw new Error("Failed to save snapshot")
       }
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error && error.message.includes("does not exist")
+          ? "Database Setup Required: Please run the migration script from Project Settings"
+          : "Failed to save snapshot"
+      toast({ title: "Error", description: errorMessage, variant: "destructive" })
     }
   }
+
+  const loadSnapshot = (snapshot: Snapshot) => {
+    try {
+      const levelsData = snapshot.levels_data
+
+      snapshot.timeframes.forEach((timeframe) => {
+        if (levelsData[timeframe]) {
+          drawLevels(timeframe as any, levelsData[timeframe], true)
+        }
+      })
+
+      toast({
+        title: "Snapshot loaded",
+        description: `Loaded "${snapshot.snapshot_name}" with ${snapshot.timeframes.join(", ")} levels`,
+      })
+    } catch (error) {
+      toast({ title: "Error", description: "Failed to load snapshot", variant: "destructive" })
+    }
+  }
+
+  const fetchSnapshots = async () => {
+    try {
+      const response = await fetch(`/api/level-sets/snapshots?symbol=${symbol}`)
+      if (response.ok) {
+        const data = await response.json()
+        setSnapshots(data.data || [])
+      }
+    } catch (error) {
+      // Silently handle missing database tables - don't show error to user
+      console.log("Snapshots not available yet - database tables may need to be created")
+      setSnapshots([])
+    }
+  }
+
+  useEffect(() => {
+    fetchSnapshots()
+  }, [symbol])
 
   const fetchChartData = async () => {
     setLoading(true)
     setError(null)
 
     try {
-      const params = new URLSearchParams({
-        symbol,
-        interval,
-      })
+      const params = new URLSearchParams({ symbol, interval })
 
       if (interval === "daily") {
         const fromDate = new Date(date)
@@ -266,103 +456,81 @@ export function ChartContainer() {
         params.append("to", date)
       }
 
-      console.log("[v0] Fetching chart data with params:", params.toString())
-
       const response = await fetch(`/api/chart-data?${params}`)
-
       if (!response.ok) {
         const errorData = await response.json()
         throw new Error(errorData.error || `HTTP ${response.status}`)
       }
 
       const data: ChartData[] = await response.json()
-
       if (!data || data.length === 0) {
         throw new Error(`No chart data available for ${symbol}`)
       }
 
-      console.log("[v0] Received chart data:", data.length, "points")
       setChartData(data)
-
       if (chartRef.current?.candlestickSeries) {
         chartRef.current.candlestickSeries.setData(data)
-        console.log("[v0] Chart updated with real data")
       }
 
-      toast({
-        title: "Chart Updated",
-        description: `Loaded ${data.length} data points for ${symbol}`,
-      })
+      toast({ title: "Chart Updated", description: `Loaded ${data.length} data points for ${symbol}` })
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Failed to fetch chart data"
       setError(errorMessage)
-      console.error("[v0] Error fetching chart data:", error)
 
       const sampleData = generateSampleData()
       setChartData(sampleData)
       if (chartRef.current?.candlestickSeries) {
         chartRef.current.candlestickSeries.setData(sampleData)
-        console.log("[v0] Fallback to sample data")
       }
 
-      toast({
-        title: "Using Sample Data",
-        description: errorMessage,
-        variant: "destructive",
-      })
+      toast({ title: "Using Sample Data", description: errorMessage, variant: "destructive" })
     } finally {
       setLoading(false)
     }
   }
 
-  const handleSearch = () => {
-    if (symbol.trim()) {
-      fetchChartData()
-      fetchLevels()
-    }
-  }
-
   const handleSymbolSelect = (selectedSymbol: string) => {
     const cleanedSymbol = validateSymbol(selectedSymbol)
-    console.log("[v0] Symbol selected:", selectedSymbol, "cleaned:", cleanedSymbol)
     setSymbol(cleanedSymbol)
     setTimeout(() => {
       fetchChartData()
-      fetchLevels()
+      fetchSnapshots()
     }, 100)
   }
 
-  const handleAutoMarkLevels = async () => {
+  const handleAutoMarkLevels = async (timeframe: "daily" | "weekly" | "monthly") => {
     if (!symbol.trim()) {
-      toast({
-        title: "Error",
-        description: "Please select a symbol first",
-        variant: "destructive",
-      })
+      toast({ title: "Error", description: "Please select a symbol first", variant: "destructive" })
       return
     }
 
     setAutoMarkLoading(true)
     try {
-      const result = await markLevels(symbol, interval)
+      const result = await markLevels(symbol, timeframe)
 
       if (result.success && result.levels) {
         const validatedLevels = validateLevelsData(result.levels)
         if (validatedLevels) {
-          setLevels(validatedLevels)
-          drawLevels(validatedLevels)
-          toast({
-            title: "Success",
-            description: `Levels marked for ${symbol} (${interval})`,
+          drawLevels(timeframe, validatedLevels)
+
+          // Save to database
+          await fetch("/api/level-sets/upsert", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              symbol,
+              timeframe,
+              asOfDate: date,
+              ...validatedLevels,
+            }),
           })
-        } else {
-          throw new Error("Invalid levels calculated")
+
+          toast({ title: "Success", description: `Levels marked: ${symbol} · ${timeframe}` })
         }
       } else {
         throw new Error(result.message)
       }
     } catch (error) {
-      console.error("[v0] Error auto-marking levels:", error)
       toast({
         title: "Failed to mark levels",
         description: "Check API connection and try again",
@@ -374,35 +542,14 @@ export function ChartContainer() {
   }
 
   const validateLevelsData = (data: any): LevelsData | null => {
-    if (!data || typeof data !== "object") {
-      return null
-    }
-
+    if (!data || typeof data !== "object") return null
     const { upper1, lower1, upper2, lower2 } = data
-
-    const numUpper1 = Number(upper1)
-    const numLower1 = Number(lower1)
-    const numUpper2 = Number(upper2)
-    const numLower2 = Number(lower2)
-
-    if (isNaN(numUpper1) || isNaN(numLower1) || isNaN(numUpper2) || isNaN(numLower2)) {
-      console.error("[v0] Invalid levels data:", { upper1, lower1, upper2, lower2 })
-      return null
-    }
-
-    return {
-      upper1: numUpper1,
-      lower1: numLower1,
-      upper2: numUpper2,
-      lower2: numLower2,
-    }
+    const nums = [upper1, lower1, upper2, lower2].map(Number)
+    if (nums.some(isNaN)) return null
+    return { upper1: nums[0], lower1: nums[1], upper2: nums[2], lower2: nums[3] }
   }
 
-  const validateSymbol = (symbol: string): string => {
-    // Implement symbol validation logic here
-    // For example, ensure the symbol is in the correct format
-    return symbol.trim().toUpperCase()
-  }
+  const validateSymbol = (symbol: string): string => symbol.trim().toUpperCase()
 
   return (
     <div className="space-y-6">
@@ -446,7 +593,7 @@ export function ChartContainer() {
               <Input id="date" type="date" value={date} onChange={(e) => setDate(e.target.value)} className="mt-1" />
             </div>
             <div className="flex items-end">
-              <Button onClick={handleSearch} disabled={loading} className="w-full sm:w-auto">
+              <Button onClick={() => fetchChartData()} disabled={loading} className="w-full sm:w-auto">
                 {loading ? "Loading..." : "Load Data"}
               </Button>
             </div>
@@ -456,21 +603,30 @@ export function ChartContainer() {
 
       <Card>
         <CardContent className="pt-6">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between mb-4">
             <div>
               <h3 className="text-lg font-semibold">Auto-Mark Levels</h3>
-              <p className="text-sm text-muted-foreground">
-                Automatically calculate and display ±1σ and ±2σ levels based on expected move
-              </p>
+              <p className="text-sm text-muted-foreground">Calculate ±1σ and ±2σ levels for multiple timeframes</p>
             </div>
-            <Button
-              onClick={handleAutoMarkLevels}
-              disabled={autoMarkLoading || !symbol.trim()}
-              className="flex items-center space-x-2"
-            >
-              <Target className="h-4 w-4" />
-              <span>{autoMarkLoading ? "Calculating..." : "Auto-Mark Levels"}</span>
+            <Button onClick={clearAllOverlays} variant="outline" size="sm">
+              <RotateCcw className="h-4 w-4 mr-2" />
+              Reset Overlays
             </Button>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            {(["daily", "weekly", "monthly"] as const).map((timeframe) => (
+              <Button
+                key={timeframe}
+                onClick={() => handleAutoMarkLevels(timeframe)}
+                disabled={autoMarkLoading}
+                variant="outline"
+                className="flex items-center space-x-2"
+              >
+                <Target className="h-4 w-4" />
+                <span>{timeframe.charAt(0).toUpperCase() + timeframe.slice(1)}</span>
+              </Button>
+            ))}
           </div>
         </CardContent>
       </Card>
@@ -478,51 +634,153 @@ export function ChartContainer() {
       {error && (
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
-          <AlertDescription>
-            {error}. Showing sample data instead.
-            {error.includes("not found") && " Try searching for a different symbol."}
-          </AlertDescription>
+          <AlertDescription>{error}. Showing sample data instead.</AlertDescription>
         </Alert>
       )}
 
       <Card>
-        <CardContent className="p-0">
+        <CardContent className="p-0 relative">
+          <div className="absolute top-4 right-4 z-10 flex items-center gap-4 bg-background/80 backdrop-blur-sm rounded-lg p-2 border">
+            {/* Timeframe toggles */}
+            <div className="flex items-center gap-2">
+              {(["daily", "weekly", "monthly"] as const).map((timeframe) => {
+                const groupKey = `levels:${timeframe}`
+                const group = levelGroups[groupKey]
+                const colors = getChartColors()
+                const isActive = group?.visible
+                const isFocused = focusMode === timeframe
+
+                return (
+                  <div key={timeframe} className="flex items-center gap-1">
+                    <Button
+                      variant={isActive ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => toggleTimeframeVisibility(timeframe)}
+                      className="h-6 px-2 text-xs"
+                      style={isActive ? { backgroundColor: colors[timeframe], borderColor: colors[timeframe] } : {}}
+                    >
+                      <div className="w-2 h-2 rounded-full mr-1" style={{ backgroundColor: colors[timeframe] }} />
+                      {timeframe.charAt(0).toUpperCase()}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => toggleFocusMode(timeframe)}
+                      className="h-6 w-6 p-0"
+                    >
+                      {isFocused ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                    </Button>
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Zones toggle */}
+            <div className="flex items-center gap-2 border-l pl-4">
+              <Label htmlFor="zones-toggle" className="text-xs">
+                Zones
+              </Label>
+              <Switch id="zones-toggle" checked={showZones} onCheckedChange={setShowZones} className="scale-75" />
+            </div>
+
+            {/* Save/Load controls */}
+            <div className="flex items-center gap-2 border-l pl-4">
+              <Dialog open={saveDialogOpen} onOpenChange={setSaveDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button variant="outline" size="sm">
+                    <Save className="h-3 w-3 mr-1" />
+                    Save
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Save Levels Snapshot</DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-4">
+                    <div>
+                      <Label htmlFor="snapshot-name">Snapshot Name *</Label>
+                      <Input
+                        id="snapshot-name"
+                        value={snapshotName}
+                        onChange={(e) => setSnapshotName(e.target.value)}
+                        placeholder="e.g., TSLA Aug levels"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="snapshot-note">Note (optional)</Label>
+                      <Textarea
+                        id="snapshot-note"
+                        value={snapshotNote}
+                        onChange={(e) => setSnapshotNote(e.target.value)}
+                        placeholder="Optional description..."
+                      />
+                    </div>
+                    <Button onClick={saveSnapshot} className="w-full">
+                      Save Snapshot
+                    </Button>
+                  </div>
+                </DialogContent>
+              </Dialog>
+
+              <Button variant="outline" size="sm" onClick={() => setShowSnapshots(!showSnapshots)}>
+                {showSnapshots ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                Snapshots
+              </Button>
+            </div>
+          </div>
+
           <div ref={chartContainerRef} className="w-full min-h-[500px] lg:min-h-[70vh]" />
         </CardContent>
       </Card>
 
-      {levels && (
+      {showSnapshots && (
         <Card>
           <CardHeader>
-            <CardTitle>Current Levels for {symbol}</CardTitle>
+            <CardTitle>Saved Snapshots for {symbol}</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="text-center p-3 rounded-lg bg-muted">
-                <div className="text-sm text-muted-foreground">+2σ</div>
-                <div className="text-lg font-bold">
-                  {typeof levels.upper2 === "number" ? levels.upper2.toFixed(2) : "N/A"}
-                </div>
+            {snapshots.length === 0 ? (
+              <p className="text-muted-foreground text-center py-4">No snapshots saved yet</p>
+            ) : (
+              <div className="space-y-2">
+                {snapshots.map((snapshot) => (
+                  <div key={snapshot.id} className="flex items-center justify-between p-3 border rounded-lg">
+                    <div className="flex-1">
+                      <div className="font-medium">{snapshot.snapshot_name}</div>
+                      <div className="text-sm text-muted-foreground">
+                        {snapshot.timeframes.map((tf) => (
+                          <span key={tf} className="inline-block bg-muted px-1 rounded text-xs mr-1">
+                            {tf.charAt(0).toUpperCase()}
+                          </span>
+                        ))}
+                        · {new Date(snapshot.created_at).toLocaleDateString()}
+                      </div>
+                      {snapshot.note && <div className="text-xs text-muted-foreground mt-1">{snapshot.note}</div>}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button variant="outline" size="sm" onClick={() => loadSnapshot(snapshot)}>
+                        Load
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={async () => {
+                          try {
+                            await fetch(`/api/level-sets/snapshots?id=${snapshot.id}`, { method: "DELETE" })
+                            fetchSnapshots()
+                            toast({ title: "Snapshot deleted" })
+                          } catch (error) {
+                            toast({ title: "Error", description: "Failed to delete snapshot", variant: "destructive" })
+                          }
+                        }}
+                      >
+                        Delete
+                      </Button>
+                    </div>
+                  </div>
+                ))}
               </div>
-              <div className="text-center p-3 rounded-lg bg-muted">
-                <div className="text-sm text-muted-foreground">+1σ</div>
-                <div className="text-lg font-bold">
-                  {typeof levels.upper1 === "number" ? levels.upper1.toFixed(2) : "N/A"}
-                </div>
-              </div>
-              <div className="text-center p-3 rounded-lg bg-muted">
-                <div className="text-sm text-muted-foreground">-1σ</div>
-                <div className="text-lg font-bold">
-                  {typeof levels.lower1 === "number" ? levels.lower1.toFixed(2) : "N/A"}
-                </div>
-              </div>
-              <div className="text-center p-3 rounded-lg bg-muted">
-                <div className="text-sm text-muted-foreground">-2σ</div>
-                <div className="text-lg font-bold">
-                  {typeof levels.lower2 === "number" ? levels.lower2.toFixed(2) : "N/A"}
-                </div>
-              </div>
-            </div>
+            )}
           </CardContent>
         </Card>
       )}
