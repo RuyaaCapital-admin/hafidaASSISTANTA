@@ -7,7 +7,7 @@ import { Toaster } from "@/components/ui/toaster"
 import "./globals.css"
 
 export const metadata: Metadata = {
-  title: "Trading Levels - Advanced Chart Analysis",
+  title: "Hafid Assistanta - Advanced Chart Analysis",
   description: "AI-powered trading levels analysis with TradingView charts",
   generator: "v0.app",
 }

@@ -41,65 +41,95 @@ export function ChartContainer() {
   // Initialize TradingView chart
   useEffect(() => {
     if (typeof window !== "undefined" && chartContainerRef.current) {
-      import("lightweight-charts").then(({ createChart }) => {
-        const colors = getChartColors()
+      import("lightweight-charts")
+        .then(({ createChart, CandlestickSeries, LineSeries }) => {
+          try {
+            console.log("[v0] Initializing chart...")
+            const colors = getChartColors()
 
-        const chart = createChart(chartContainerRef.current!, {
-          width: chartContainerRef.current!.clientWidth,
-          height: Math.max(500, window.innerHeight * 0.7),
-          layout: {
-            background: { color: colors.background },
-            textColor: colors.textColor,
-          },
-          grid: {
-            vertLines: { color: colors.borderColor },
-            horzLines: { color: colors.borderColor },
-          },
-          crosshair: {
-            mode: 1,
-          },
-          rightPriceScale: {
-            borderColor: colors.borderColor,
-          },
-          timeScale: {
-            borderColor: colors.borderColor,
-            timeVisible: true,
-            secondsVisible: false,
-          },
-        })
+            if (!chartContainerRef.current) {
+              console.log("[v0] Chart container ref is null")
+              return
+            }
 
-        const candlestickSeries = chart.addCandlestickSeries({
-          upColor: colors.upColor,
-          downColor: colors.downColor,
-          borderDownColor: colors.downColor,
-          borderUpColor: colors.upColor,
-          wickDownColor: colors.downColor,
-          wickUpColor: colors.upColor,
-        })
+            const containerWidth = chartContainerRef.current.clientWidth || 800
+            const containerHeight = Math.max(500, window.innerHeight * 0.7)
 
-        // Sample candlestick data
-        const sampleData = generateSampleData()
-        candlestickSeries.setData(sampleData)
-
-        chartRef.current = { chart, candlestickSeries, lineSeries: [] }
-
-        // Handle resize
-        const handleResize = () => {
-          if (chartContainerRef.current) {
-            chart.applyOptions({
-              width: chartContainerRef.current.clientWidth,
+            const chart = createChart(chartContainerRef.current, {
+              width: containerWidth,
+              height: containerHeight,
+              layout: {
+                background: { color: colors.background },
+                textColor: colors.textColor,
+              },
+              grid: {
+                vertLines: { color: colors.borderColor },
+                horzLines: { color: colors.borderColor },
+              },
+              crosshair: {
+                mode: 1,
+              },
+              rightPriceScale: {
+                borderColor: colors.borderColor,
+              },
+              timeScale: {
+                borderColor: colors.borderColor,
+                timeVisible: true,
+                secondsVisible: false,
+              },
             })
-          }
-        }
 
-        window.addEventListener("resize", handleResize)
-        return () => window.removeEventListener("resize", handleResize)
-      })
+            console.log("[v0] Chart created successfully")
+
+            const candlestickSeries = chart.addSeries(CandlestickSeries, {
+              upColor: colors.upColor,
+              downColor: colors.downColor,
+              borderDownColor: colors.downColor,
+              borderUpColor: colors.upColor,
+              wickDownColor: colors.downColor,
+              wickUpColor: colors.upColor,
+            })
+
+            console.log("[v0] Candlestick series created successfully")
+
+            // Sample candlestick data
+            const sampleData = generateSampleData()
+            candlestickSeries.setData(sampleData)
+
+            chartRef.current = { chart, candlestickSeries, lineSeries: [], LineSeries }
+
+            // Handle resize
+            const handleResize = () => {
+              if (chartContainerRef.current && chart) {
+                chart.applyOptions({
+                  width: chartContainerRef.current.clientWidth,
+                })
+              }
+            }
+
+            window.addEventListener("resize", handleResize)
+
+            return () => {
+              console.log("[v0] Cleaning up chart...")
+              window.removeEventListener("resize", handleResize)
+              if (chart) {
+                chart.remove()
+              }
+            }
+          } catch (error) {
+            console.error("[v0] Error initializing chart:", error)
+          }
+        })
+        .catch((error) => {
+          console.error("[v0] Error importing lightweight-charts:", error)
+        })
     }
 
     return () => {
       if (chartRef.current?.chart) {
+        console.log("[v0] Removing chart on cleanup")
         chartRef.current.chart.remove()
+        chartRef.current = null
       }
     }
   }, [])
@@ -136,51 +166,66 @@ export function ChartContainer() {
 
   // Draw levels on chart
   const drawLevels = (levelsData: LevelsData) => {
-    if (!chartRef.current?.chart) return
+    if (!chartRef.current?.chart || !chartRef.current?.LineSeries) {
+      console.log("[v0] Chart or LineSeries not available for drawing levels")
+      return
+    }
 
     // Clear existing levels
     clearLevels()
 
-    const { chart } = chartRef.current
+    const { chart, LineSeries } = chartRef.current
     const colors = getChartColors()
 
-    // Add horizontal lines for levels
-    const lines = [
-      { price: levelsData.upper2, color: colors.level2Color, title: "+2σ" },
-      { price: levelsData.upper1, color: colors.level1Color, title: "+1σ" },
-      { price: levelsData.lower1, color: colors.level1Color, title: "-1σ" },
-      { price: levelsData.lower2, color: colors.level2Color, title: "-2σ" },
-    ]
+    try {
+      // Add horizontal lines for levels
+      const lines = [
+        { price: levelsData.upper2, color: colors.level2Color, title: "+2σ" },
+        { price: levelsData.upper1, color: colors.level1Color, title: "+1σ" },
+        { price: levelsData.lower1, color: colors.level1Color, title: "-1σ" },
+        { price: levelsData.lower2, color: colors.level2Color, title: "-2σ" },
+      ]
 
-    const newLineSeries: any[] = []
+      const newLineSeries: any[] = []
 
-    lines.forEach(({ price, color, title }) => {
-      const lineSeries = chart.addLineSeries({
-        color,
-        lineWidth: 2,
-        lineStyle: 1, // Dashed
-        title,
-        priceLineVisible: true,
-        lastValueVisible: true,
+      lines.forEach(({ price, color, title }) => {
+        const lineSeries = chart.addSeries(LineSeries, {
+          color,
+          lineWidth: 2,
+          lineStyle: 1, // Dashed
+          title,
+          priceLineVisible: true,
+          lastValueVisible: true,
+        })
+
+        lineSeries.setData([
+          { time: "2024-01-01", value: price },
+          { time: "2024-12-31", value: price },
+        ])
+
+        newLineSeries.push(lineSeries)
       })
 
-      lineSeries.setData([
-        { time: "2024-01-01", value: price },
-        { time: "2024-12-31", value: price },
-      ])
-
-      newLineSeries.push(lineSeries)
-    })
-
-    chartRef.current.lineSeries = newLineSeries
+      chartRef.current.lineSeries = newLineSeries
+      console.log("[v0] Levels drawn successfully")
+    } catch (error) {
+      console.error("[v0] Error drawing levels:", error)
+    }
   }
 
   const clearLevels = () => {
-    if (chartRef.current?.lineSeries) {
-      chartRef.current.lineSeries.forEach((series: any) => {
-        chartRef.current.chart.removeSeries(series)
-      })
-      chartRef.current.lineSeries = []
+    if (chartRef.current?.lineSeries && chartRef.current?.chart) {
+      try {
+        chartRef.current.lineSeries.forEach((series: any) => {
+          if (typeof chartRef.current.chart.removeSeries === "function") {
+            chartRef.current.chart.removeSeries(series)
+          }
+        })
+        chartRef.current.lineSeries = []
+        console.log("[v0] Levels cleared successfully")
+      } catch (error) {
+        console.error("[v0] Error clearing levels:", error)
+      }
     }
   }
 

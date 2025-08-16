@@ -32,7 +32,7 @@ export function AgentChat() {
       id: "1",
       type: "assistant",
       content:
-        "Hello! I can help you analyze weekly levels sheets. Upload an image or CSV file, or paste your data, and I'll extract the trading levels for you.",
+        "Hello! I'm Hafid Assistanta. I can help you analyze weekly levels sheets. Upload an image or CSV file, or paste your data, and I'll extract the trading levels for you.",
       timestamp: new Date(),
     },
   ])
@@ -152,7 +152,7 @@ export function AgentChat() {
       {/* Chat Messages */}
       <Card className="min-h-[400px]">
         <CardHeader>
-          <CardTitle>Chat with AI Agent</CardTitle>
+          <CardTitle>Chat with Hafid Assistanta</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="space-y-4 max-h-[500px] overflow-y-auto">

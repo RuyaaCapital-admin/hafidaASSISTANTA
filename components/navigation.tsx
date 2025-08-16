@@ -22,7 +22,7 @@ export function Navigation() {
           <div className="flex items-center space-x-8">
             <Link href="/chart" className="flex items-center space-x-2">
               <BarChart3 className="h-6 w-6" />
-              <span className="font-bold text-xl">Trading Levels</span>
+              <span className="font-bold text-xl">Hafid Assistanta</span>
             </Link>
 
             <div className="hidden md:flex items-center space-x-1">
