@@ -90,9 +90,12 @@ export async function POST(request: NextRequest) {
         const levelsResult = await markLevels(firstSymbol, "daily")
         if (levelsResult.success) {
           console.log(`[v0] Auto-refreshed levels for ${firstSymbol} after ingest`)
+        } else {
+          console.log(`[v0] Could not refresh levels for ${firstSymbol}: ${levelsResult.error}`)
         }
       } catch (error) {
-        console.error("[v0] Error auto-refreshing levels:", error)
+        // Don't let database errors crash the ingest process
+        console.log(`[v0] Levels refresh skipped (database not set up): ${(error as Error).message}`)
       }
     }
 
