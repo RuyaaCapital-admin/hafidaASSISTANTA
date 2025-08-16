@@ -93,6 +93,8 @@ export function AgentChat() {
     e.preventDefault()
     if (!input.trim() && !file) return
 
+    console.log("[v0] Chat submit started:", { input: input.substring(0, 50), hasFile: !!file })
+
     const userMessage: Message = {
       id: Date.now().toString(),
       type: "user",
@@ -108,12 +110,16 @@ export function AgentChat() {
       let result = getCachedData(cacheKey)
 
       if (!result) {
+        console.log("[v0] Making API request to /api/ingest...")
+
         const formData = new FormData()
         if (file) {
           formData.append("file", file)
+          console.log("[v0] Added file to form data:", file.name, file.type)
         }
         if (input.trim()) {
           formData.append("message", input)
+          console.log("[v0] Added message to form data:", input.substring(0, 100))
         }
 
         const response = await fetch("/api/ingest", {
@@ -121,12 +127,20 @@ export function AgentChat() {
           body: formData,
         })
 
+        console.log("[v0] API response status:", response.status)
+        console.log("[v0] API response headers:", Object.fromEntries(response.headers.entries()))
+
         if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`)
+          const errorText = await response.text()
+          console.error("[v0] API error response:", errorText)
+          throw new Error(`HTTP error! status: ${response.status} - ${errorText}`)
         }
 
         result = await response.json()
+        console.log("[v0] API response data:", result)
         setCachedData(cacheKey, result)
+      } else {
+        console.log("[v0] Using cached response")
       }
 
       let responseContent = result.message
@@ -160,6 +174,7 @@ export function AgentChat() {
       }
 
       setMessages((prev) => [...prev, assistantMessage])
+      console.log("[v0] Chat response added successfully")
 
       if (result.type === "function") {
         toast({
@@ -176,11 +191,12 @@ export function AgentChat() {
         })
       }
     } catch (error) {
+      console.error("[v0] Chat error:", error)
+
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
         type: "assistant",
-        content:
-          "❌ Sorry, there was an error processing your request. Please try again or check that your input is valid.",
+        content: `❌ Sorry, there was an error processing your request: ${error instanceof Error ? error.message : "Unknown error"}. Please try again.`,
         timestamp: new Date(),
       }
 
@@ -188,7 +204,7 @@ export function AgentChat() {
 
       toast({
         title: "Error",
-        description: "Failed to process your request",
+        description: error instanceof Error ? error.message : "Failed to process your request",
         variant: "destructive",
       })
     } finally {
@@ -198,18 +214,17 @@ export function AgentChat() {
       if (fileInputRef.current) {
         fileInputRef.current.value = ""
       }
-      setTimeout(() => inputRef.current?.focus(), 100)
     }
   }
 
   return (
-    <div className="space-y-4">
-      <Card className="h-[400px] xl:h-[500px]">
-        <CardHeader className="pb-3">
+    <div className="flex flex-col h-full max-h-[600px]">
+      <Card className="flex-1 flex flex-col min-h-0">
+        <CardHeader className="pb-3 flex-shrink-0">
           <CardTitle className="text-lg">AI Assistant</CardTitle>
         </CardHeader>
-        <CardContent className="pb-3">
-          <div className="space-y-3 h-[300px] xl:h-[400px] overflow-y-auto pr-2">
+        <CardContent className="pb-3 flex-1 flex flex-col min-h-0">
+          <div className="flex-1 space-y-3 overflow-y-auto pr-2 min-h-0" style={{ scrollBehavior: "smooth" }}>
             {messages.map((message) => (
               <div key={message.id} className={`flex ${message.type === "user" ? "justify-end" : "justify-start"}`}>
                 <div
@@ -235,7 +250,7 @@ export function AgentChat() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="mt-4 flex-shrink-0">
         <CardContent className="pt-4">
           <form onSubmit={handleSubmit} className="space-y-3">
             {/* File Upload */}

@@ -4,11 +4,27 @@ import { type NextRequest, NextResponse } from "next/server"
 import OpenAI from "openai"
 import { markLevels } from "@/lib/mark-levels"
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-})
+function createOpenAIClient(): OpenAI | null {
+  try {
+    if (!process.env.OPENAI_API_KEY) {
+      console.error("[v0] OpenAI API key not found in environment variables")
+      return null
+    }
+    return new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+      dangerouslyAllowBrowser: true,
+    })
+  } catch (error) {
+    console.error("[v0] Error creating OpenAI client:", error)
+    return null
+  }
+}
 
 function detectChartInstructions(message: string): { hasInstructions: boolean; symbols: string[]; action?: string } {
+  if (!message || typeof message !== "string") {
+    return { hasInstructions: false, symbols: [] }
+  }
+
   const lowerMessage = message.toLowerCase()
 
   // Common chart/levels keywords
@@ -57,6 +73,19 @@ function detectChartInstructions(message: string): { hasInstructions: boolean; s
 
 async function generateChatResponse(message: string): Promise<string> {
   try {
+    if (!message || typeof message !== "string") {
+      console.log("[v0] Invalid message parameter:", message)
+      return "I'm here to help! You can ask me to analyze charts, mark levels, or upload trading data files."
+    }
+
+    console.log("[v0] Generating OpenAI chat response for message:", message.substring(0, 100))
+
+    const openai = createOpenAIClient()
+    if (!openai) {
+      throw new Error("OpenAI client not available")
+    }
+
+    console.log("[v0] Making OpenAI API call...")
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       max_tokens: 500,
@@ -74,22 +103,46 @@ async function generateChatResponse(message: string): Promise<string> {
       ],
     })
 
-    return (
-      response.choices[0]?.message?.content ||
-      "I'm here to help with your trading analysis. What would you like to explore?"
-    )
+    console.log("[v0] OpenAI API call completed, processing response...")
+
+    if (!response || !response.choices || response.choices.length === 0) {
+      console.log("[v0] Invalid OpenAI response structure:", response)
+      return "I'm here to help with your trading analysis. What would you like to explore?"
+    }
+
+    const choice = response.choices[0]
+    if (!choice || !choice.message) {
+      console.log("[v0] Invalid choice or message in response:", choice)
+      return "I'm here to help with your trading analysis. What would you like to explore?"
+    }
+
+    const chatResponse =
+      choice.message.content || "I'm here to help with your trading analysis. What would you like to explore?"
+
+    const responsePreview = typeof chatResponse === "string" ? chatResponse.substring(0, 100) : "Invalid response type"
+    console.log("[v0] OpenAI response generated successfully:", responsePreview)
+
+    return chatResponse
   } catch (error) {
-    console.error("Error generating chat response:", error)
+    console.error("[v0] Error generating chat response:", error)
+    if (error instanceof Error) {
+      console.error("[v0] Error name:", error.name)
+      console.error("[v0] Error message:", error.message)
+      console.error("[v0] Error stack:", error.stack)
+    }
     return "I'm here to help! You can ask me to analyze charts, mark levels, or upload trading data files."
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    console.log("[v0] Processing ingest request...")
+    console.log("[v0] ===== INGEST API REQUEST STARTED =====")
+    console.log("[v0] Request URL:", request.url)
+    console.log("[v0] Request method:", request.method)
 
-    if (!process.env.OPENAI_API_KEY) {
-      console.error("[v0] OpenAI API key not found in environment variables")
+    const openai = createOpenAIClient()
+    if (!openai) {
+      console.error("[v0] OpenAI client not available")
       return NextResponse.json(
         {
           type: "chat",
@@ -102,14 +155,25 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    console.log("[v0] OpenAI client created successfully, proceeding with request processing")
+
     const formData = await request.formData()
     const file = formData.get("file") as File
     const message = formData.get("message") as string
 
-    console.log("[v0] Request data:", { hasFile: !!file, message: message?.substring(0, 100) })
+    console.log("[v0] Request data parsed:", {
+      hasFile: !!file,
+      fileName: file?.name,
+      fileType: file?.type,
+      messageLength: message?.length,
+      message: message?.substring(0, 100),
+    })
 
     if (!file && message) {
+      console.log("[v0] Processing text message:", message.substring(0, 100))
+
       const chartInstructions = detectChartInstructions(message)
+      console.log("[v0] Chart instructions detected:", chartInstructions)
 
       if (chartInstructions.hasInstructions) {
         // Handle chart/levels function calls
@@ -119,29 +183,34 @@ export async function POST(request: NextRequest) {
             console.log("[v0] Marking levels for symbol:", firstSymbol)
             const levelsResult = await markLevels(firstSymbol, "daily")
 
-            return NextResponse.json({
+            const response = {
               type: "function",
               message: `Marked levels for ${firstSymbol}. ${levelsResult.success ? "Levels updated successfully!" : "Note: Levels drawn on chart but not saved to database."}`,
               symbols: chartInstructions.symbols,
               levels: levelsResult.success ? ["Levels marked on chart"] : [],
               error: levelsResult.success ? undefined : "Database not set up - levels shown on chart only",
-            })
+            }
+
+            console.log("[v0] Returning function response:", response)
+            return NextResponse.json(response)
           } catch (error) {
             console.error("[v0] Error marking levels:", error)
-            return NextResponse.json({
+            const response = {
               type: "function",
               message: `I can show levels for ${chartInstructions.symbols[0]} on the chart, but they won't be saved without database setup.`,
               symbols: chartInstructions.symbols,
               levels: [],
               error: "Database not configured",
-            })
+            }
+            console.log("[v0] Returning error response:", response)
+            return NextResponse.json(response)
           }
         } else {
           // General chart analysis request
           try {
             console.log("[v0] Generating chat response for chart analysis...")
             const chatResponse = await generateChatResponse(message)
-            return NextResponse.json({
+            const response = {
               type: "function",
               message:
                 chatResponse +
@@ -151,16 +220,20 @@ export async function POST(request: NextRequest) {
               symbols: chartInstructions.symbols,
               levels: [],
               error: undefined,
-            })
+            }
+            console.log("[v0] Returning chart analysis response:", response)
+            return NextResponse.json(response)
           } catch (error) {
             console.error("[v0] Error generating chat response:", error)
-            return NextResponse.json({
+            const response = {
               type: "chat",
               message: "I'm having trouble processing your request right now. Please try again.",
               symbols: [],
               levels: [],
               error: error instanceof Error ? error.message : "Unknown error",
-            })
+            }
+            console.log("[v0] Returning error response:", response)
+            return NextResponse.json(response)
           }
         }
       } else {
@@ -168,27 +241,32 @@ export async function POST(request: NextRequest) {
         try {
           console.log("[v0] Generating conversational response...")
           const chatResponse = await generateChatResponse(message)
-          return NextResponse.json({
+          const response = {
             type: "chat",
             message: chatResponse,
             symbols: [],
             levels: [],
             error: undefined,
-          })
+          }
+          console.log("[v0] Returning conversational response:", response)
+          return NextResponse.json(response)
         } catch (error) {
           console.error("[v0] Error in conversational response:", error)
-          return NextResponse.json({
+          const response = {
             type: "chat",
             message: "I'm having trouble processing your message right now. Please try again.",
             symbols: [],
             levels: [],
             error: error instanceof Error ? error.message : "Unknown error",
-          })
+          }
+          console.log("[v0] Returning error response:", response)
+          return NextResponse.json(response)
         }
       }
     }
 
     if (!file && !message) {
+      console.log("[v0] No file or message provided")
       return NextResponse.json(
         {
           type: "chat",
@@ -290,6 +368,7 @@ export async function POST(request: NextRequest) {
       error: symbols.length === 0 ? "No valid symbols found in the data" : undefined,
     })
   } catch (error) {
+    console.error("[v0] ===== INGEST API ERROR =====")
     console.error("[v0] Error processing request:", error)
     const errorMessage = error instanceof Error ? error.message : "Unknown error occurred"
     console.error("[v0] Full error details:", error)
@@ -300,7 +379,7 @@ export async function POST(request: NextRequest) {
         message: "Sorry, I encountered an error processing your request. Please try again.",
         symbols: [],
         levels: [],
-        error: errorMessage,
+        error: `${errorMessage} - Check server logs for details`,
       },
       { status: 500 },
     )
