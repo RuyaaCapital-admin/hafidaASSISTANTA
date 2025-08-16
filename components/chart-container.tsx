@@ -68,10 +68,7 @@ export function ChartContainer() {
   const [snapshotName, setSnapshotName] = useState("")
   const [snapshotNote, setSnapshotNote] = useState("")
 
-  const [selectedTimeframe, setSelectedTimeframe] = useState<string>("1d")
-  const [wsConnection, setWsConnection] = useState<WebSocket | null>(null)
-  const [isRealTimeEnabled, setIsRealTimeEnabled] = useState(false)
-
+  const [timeframe, setTimeframe] = useState<string>("1d")
   const chartContainerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<any>(null)
   const { toast } = useToast()
@@ -537,7 +534,7 @@ export function ChartContainer() {
   const fetchChartData = async (timeframe?: string) => {
     if (!symbol) return
 
-    const tf = timeframe || selectedTimeframe
+    const tf = timeframe || interval
     setLoading(true)
     setError(null)
 
@@ -566,11 +563,6 @@ export function ChartContainer() {
 
         if (chartRef.current?.candlestickSeries) {
           chartRef.current.candlestickSeries.setData(candles)
-        }
-
-        // Connect WebSocket for real-time updates if enabled
-        if (isRealTimeEnabled || tf.includes("m") || tf.includes("h")) {
-          connectWebSocket(cleanSymbol)
         }
       } else {
         throw new Error("No chart data available")
@@ -691,81 +683,10 @@ export function ChartContainer() {
   }
 
   const connectWebSocket = (symbol: string) => {
-    if (!symbol || !process.env.NEXT_PUBLIC_EODHD_API_KEY) return
-
-    // Close existing connection
-    if (wsConnection) {
-      wsConnection.close()
-      setWsConnection(null)
-    }
-
-    try {
-      let wsUrl = ""
-
-      // Determine WebSocket endpoint based on symbol type
-      if (symbol.endsWith(".US") || symbol.includes("NYSE") || symbol.includes("NASDAQ")) {
-        wsUrl = `wss://ws.eodhistoricaldata.com/ws/us?api_token=${process.env.NEXT_PUBLIC_EODHD_API_KEY}`
-      } else if (symbol.endsWith(".FOREX")) {
-        wsUrl = `wss://ws.eodhistoricaldata.com/ws/forex?api_token=${process.env.NEXT_PUBLIC_EODHD_API_KEY}`
-      } else if (symbol.endsWith(".CC")) {
-        wsUrl = `wss://ws.eodhistoricaldata.com/ws/crypto?api_token=${process.env.NEXT_PUBLIC_EODHD_API_KEY}`
-      } else {
-        // Default to US market
-        wsUrl = `wss://ws.eodhistoricaldata.com/ws/us?api_token=${process.env.NEXT_PUBLIC_EODHD_API_KEY}`
-      }
-
-      const ws = new WebSocket(wsUrl)
-
-      ws.onopen = () => {
-        console.log("[v0] WebSocket connected for", symbol)
-        // Subscribe to symbol
-        ws.send(
-          JSON.stringify({
-            action: "subscribe",
-            symbols: [symbol.replace(/\.(US|FOREX|CC)$/, "")],
-          }),
-        )
-        setIsRealTimeEnabled(true)
-      }
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data)
-          if (data.s === symbol.replace(/\.(US|FOREX|CC)$/, "") && data.p) {
-            // Update current price display
-            setCurrentPrice(data.p)
-
-            // Optionally update the last candle with real-time price
-            if (chartRef.current?.candlestickSeries && chartData.length > 0) {
-              const lastCandle = { ...chartData[chartData.length - 1] }
-              lastCandle.close = data.p
-              lastCandle.high = Math.max(lastCandle.high, data.p)
-              lastCandle.low = Math.min(lastCandle.low, data.p)
-
-              chartRef.current.candlestickSeries.update(lastCandle)
-            }
-          }
-        } catch (error) {
-          console.error("[v0] Error processing WebSocket data:", error)
-        }
-      }
-
-      ws.onerror = (error) => {
-        console.error("[v0] WebSocket error:", error)
-        setIsRealTimeEnabled(false)
-      }
-
-      ws.onclose = () => {
-        console.log("[v0] WebSocket disconnected")
-        setIsRealTimeEnabled(false)
-        setWsConnection(null)
-      }
-
-      setWsConnection(ws)
-    } catch (error) {
-      console.error("[v0] Error connecting WebSocket:", error)
-      setIsRealTimeEnabled(false)
-    }
+    console.log("[v0] Real-time WebSocket functionality temporarily disabled for security")
+    // WebSocket connections moved to server-side for security
+    // This prevents exposing the EODHD API key in client code
+    return
   }
 
   const timeframeOptions = [
@@ -781,16 +702,11 @@ export function ChartContainer() {
   ]
 
   const handleTimeframeChange = (newTimeframe: string) => {
-    setSelectedTimeframe(newTimeframe)
+    setTimeframe(newTimeframe)
     fetchChartData(newTimeframe)
 
-    // Enable/disable real-time based on timeframe
-    const option = timeframeOptions.find((opt) => opt.value === newTimeframe)
-    if (option?.realTime && !isRealTimeEnabled) {
-      connectWebSocket(symbol)
-    } else if (!option?.realTime && wsConnection) {
-      wsConnection.close()
-    }
+    // Real-time functionality will be implemented via server-side API routes
+    console.log("[v0] Real-time updates temporarily disabled for security")
   }
 
   return (
@@ -1032,7 +948,7 @@ export function ChartContainer() {
               {timeframeOptions.map((option) => (
                 <Button
                   key={option.value}
-                  variant={selectedTimeframe === option.value ? "default" : "outline"}
+                  variant={timeframe === option.value ? "default" : "outline"}
                   size="sm"
                   onClick={() => handleTimeframeChange(option.value)}
                   className="h-6 px-2 text-xs"
@@ -1054,14 +970,6 @@ export function ChartContainer() {
               <RotateCcw className="h-3 w-3 mr-1" />
               Reset View
             </Button>
-
-            {/* Real-time indicator */}
-            {isRealTimeEnabled && (
-              <div className="flex items-center gap-1 text-xs text-green-600">
-                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-                Live
-              </div>
-            )}
           </div>
 
           <div ref={chartContainerRef} className="w-full min-h-[500px] lg:min-h-[70vh]" />

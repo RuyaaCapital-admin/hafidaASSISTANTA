@@ -6,12 +6,36 @@ import { markLevels } from "@/lib/mark-levels"
 
 function createOpenAIClient(): OpenAI | null {
   try {
-    if (!process.env.OPENAI_API_KEY) {
+    const apiKey = process.env.OPENAI_API_KEY
+
+    if (!apiKey) {
       console.error("[v0] OpenAI API key not found in environment variables")
       return null
     }
+
+    // Check for empty string or whitespace-only key
+    const trimmedKey = apiKey.trim()
+    if (!trimmedKey || trimmedKey.length === 0) {
+      console.error("[v0] OpenAI API key is empty or contains only whitespace")
+      return null
+    }
+
+    // Basic format validation (OpenAI keys typically start with 'sk-')
+    if (!trimmedKey.startsWith("sk-")) {
+      console.error("[v0] OpenAI API key appears to have invalid format (should start with 'sk-')")
+      return null
+    }
+
+    // Check minimum length (OpenAI keys are typically longer than 20 characters)
+    if (trimmedKey.length < 20) {
+      console.error("[v0] OpenAI API key appears too short to be valid")
+      return null
+    }
+
+    console.log("[v0] OpenAI API key validation passed, creating client...")
+
     return new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY,
+      apiKey: trimmedKey,
       dangerouslyAllowBrowser: true,
     })
   } catch (error) {
@@ -82,26 +106,31 @@ async function generateChatResponse(message: string): Promise<string> {
 
     const openai = createOpenAIClient()
     if (!openai) {
-      throw new Error("OpenAI client not available")
+      console.error("[v0] Cannot create OpenAI client - API key validation failed")
+      return "I'm having trouble connecting to the AI service. Please check that the OpenAI API key is properly configured."
     }
 
     console.log("[v0] Making OpenAI API call...")
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      max_tokens: 500,
-      temperature: 0.7,
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are Hafid Assistanta, a helpful trading assistant. You help users analyze charts, mark trading levels, and discuss market data. Keep responses concise and friendly. If users ask about specific tickers or charts, encourage them to be more specific about what they want to analyze.",
-        },
-        {
-          role: "user",
-          content: message,
-        },
-      ],
-    })
+
+    const response = (await Promise.race([
+      openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        max_tokens: 500,
+        temperature: 0.7,
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are Hafid Assistanta, a helpful trading assistant. You help users analyze charts, mark trading levels, and discuss market data. Keep responses concise and friendly. If users ask about specific tickers or charts, encourage them to be more specific about what they want to analyze.",
+          },
+          {
+            role: "user",
+            content: message,
+          },
+        ],
+      }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("OpenAI API call timeout")), 30000)),
+    ])) as any
 
     console.log("[v0] OpenAI API call completed, processing response...")
 
