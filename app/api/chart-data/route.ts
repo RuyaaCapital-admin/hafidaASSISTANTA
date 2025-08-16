@@ -110,14 +110,21 @@ async function fetchIntradayData(cleanSymbol: string, interval: string, apiKey: 
     throw new Error(`EODHD intraday API error: ${response.status} ${response.statusText}`)
   }
 
-  const data: EODHDCandle[] = await response.json()
+  const data = await response.json()
   console.log("[v0] Raw intraday response:", Array.isArray(data) ? `${data.length} items` : typeof data)
 
   if (!Array.isArray(data) || data.length === 0) {
     throw new Error(`No intraday data available for ${cleanSymbol}`)
   }
 
-  return processCandles(data, false)
+  const processedData = processIntradayCandles(data)
+  console.log("[v0] Processed intraday candles:", processedData.length)
+
+  if (processedData.length === 0) {
+    throw new Error(`Failed to process intraday data for ${cleanSymbol}`)
+  }
+
+  return processedData
 }
 
 async function fetchDailyData(
@@ -169,9 +176,84 @@ async function fetchDailyData(
   return processedData.map(({ date, ...candle }) => candle)
 }
 
+function processIntradayCandles(data: any[]) {
+  return data
+    .map((item) => {
+      // Handle different possible formats from EODHD intraday API
+      const candle = {
+        datetime: item.datetime || item.date || item.timestamp,
+        open: item.open || item.o,
+        high: item.high || item.h,
+        low: item.low || item.l,
+        close: item.close || item.c,
+        volume: item.volume || item.v || 0,
+      }
+
+      // Validate that we have all required fields
+      if (
+        !candle.datetime ||
+        candle.open === undefined ||
+        candle.high === undefined ||
+        candle.low === undefined ||
+        candle.close === undefined
+      ) {
+        return null
+      }
+
+      // Convert datetime to timestamp
+      let time: number
+      if (typeof candle.datetime === "string") {
+        time = Math.floor(new Date(candle.datetime).getTime() / 1000)
+      } else if (typeof candle.datetime === "number") {
+        // If it's already a timestamp, use it (might be in seconds or milliseconds)
+        time = candle.datetime > 1000000000000 ? Math.floor(candle.datetime / 1000) : candle.datetime
+      } else {
+        return null
+      }
+
+      // Convert all values to numbers and validate
+      const open = Number(candle.open)
+      const high = Number(candle.high)
+      const low = Number(candle.low)
+      const close = Number(candle.close)
+      const volume = Number(candle.volume)
+
+      // Validate all numbers are valid
+      if (isNaN(time) || isNaN(open) || isNaN(high) || isNaN(low) || isNaN(close) || isNaN(volume)) {
+        return null
+      }
+
+      // Validate price logic (high >= low, etc.)
+      if (high < low || open < 0 || high < 0 || low < 0 || close < 0) {
+        return null
+      }
+
+      return {
+        time,
+        open,
+        high,
+        low,
+        close,
+        volume,
+      }
+    })
+    .filter((candle): candle is NonNullable<typeof candle> => candle !== null)
+    .sort((a, b) => a.time - b.time)
+}
+
 function processCandles(data: EODHDCandle[], isDaily: boolean) {
   return data
     .map((candle) => {
+      if (
+        !candle.date ||
+        candle.open === undefined ||
+        candle.high === undefined ||
+        candle.low === undefined ||
+        candle.close === undefined
+      ) {
+        return null
+      }
+
       let time: number
       if (isDaily) {
         time = Math.floor(new Date(candle.date + "T00:00:00Z").getTime() / 1000)
@@ -179,20 +261,34 @@ function processCandles(data: EODHDCandle[], isDaily: boolean) {
         time = Math.floor(new Date(candle.date).getTime() / 1000)
       }
 
+      // Convert all values to numbers with validation
+      const open = Number(candle.open)
+      const high = Number(candle.high)
+      const low = Number(candle.low)
+      const close = Number(candle.close)
+      const volume = Number(candle.volume || 0)
+
+      // Validate all numbers are valid and positive
+      if (isNaN(time) || isNaN(open) || isNaN(high) || isNaN(low) || isNaN(close) || isNaN(volume)) {
+        return null
+      }
+
+      // Validate price logic
+      if (high < low || open < 0 || high < 0 || low < 0 || close < 0) {
+        return null
+      }
+
       return {
         time,
-        open: Number(candle.open),
-        high: Number(candle.high),
-        low: Number(candle.low),
-        close: Number(candle.close),
-        volume: Number(candle.volume || 0),
+        open,
+        high,
+        low,
+        close,
+        volume,
         date: candle.date,
       }
     })
-    .filter(
-      (candle) =>
-        !isNaN(candle.time) && !isNaN(candle.open) && !isNaN(candle.high) && !isNaN(candle.low) && !isNaN(candle.close),
-    )
+    .filter((candle): candle is NonNullable<typeof candle> => candle !== null)
     .sort((a, b) => a.time - b.time)
 }
 
