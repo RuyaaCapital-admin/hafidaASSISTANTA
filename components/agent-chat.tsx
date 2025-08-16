@@ -78,9 +78,6 @@ export function AgentChat() {
 
       const response = await fetch("/api/ingest", {
         method: "POST",
-        headers: {
-          "x-api-key": process.env.NEXT_PUBLIC_INGEST_API_KEY || "dev-key",
-        },
         body: formData,
       })
 

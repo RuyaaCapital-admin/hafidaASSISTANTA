@@ -1,5 +1,5 @@
-@import 'tailwindcss';
-@import 'tw-animate-css';
+@import "tailwindcss";
+@import "tw-animate-css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -111,6 +111,62 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+}
+
+/* Chart-specific styles for TradingView integration */
+.tv-lightweight-charts {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.chart-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 400px;
+}
+
+.chart-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 400px;
+  text-align: center;
+}
+
+/* Table styles for expected move table */
+.em-table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.em-table th,
+.em-table td {
+  text-align: right;
+  padding: 8px 12px;
+}
+
+.em-table .symbol-column {
+  text-align: left;
+  font-weight: 600;
+}
+
+/* Responsive utilities for mobile optimization */
+@media (max-width: 768px) {
+  .chart-container {
+    height: 300px;
+  }
+
+  .em-table {
+    font-size: 0.875rem;
+  }
+
+  .em-table th,
+  .em-table td {
+    padding: 6px 8px;
+  }
 }
 
 @layer base {
