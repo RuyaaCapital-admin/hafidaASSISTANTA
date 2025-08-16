@@ -832,42 +832,139 @@ export function ChartContainer() {
 
       <Card>
         <CardContent className="p-0 relative">
-          <div className="absolute top-4 right-4 z-10 flex items-center gap-4 bg-background/80 backdrop-blur-sm rounded-lg p-2 border">
+          <div className="absolute top-4 left-4 right-4 z-10 flex items-center justify-between gap-4 bg-background/90 backdrop-blur-sm rounded-lg p-2 border">
+            {/* Left side: Timeframe selector and reset button */}
             <div className="flex items-center gap-2">
-              {(["daily", "weekly", "monthly"] as const).map((timeframe) => {
-                const groupKey = `levels:${timeframe}`
-                const group = levelGroups[groupKey]
-                const colors = getChartColors()
-                const isActive = group?.visible
-                const isFocused = focusMode === timeframe
+              <div className="flex items-center gap-1">
+                {timeframeOptions.map((option) => (
+                  <Button
+                    key={option.value}
+                    variant={timeframe === option.value ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => handleTimeframeChange(option.value)}
+                    className="h-6 px-2 text-xs"
+                  >
+                    {option.label}
+                    {option.realTime && <div className="w-1 h-1 bg-green-500 rounded-full ml-1" />}
+                  </Button>
+                ))}
+              </div>
 
-                return (
-                  <div key={timeframe} className="flex items-center gap-1">
-                    <Button
-                      variant={isActive ? "default" : "outline"}
-                      size="sm"
-                      onClick={() => toggleTimeframeVisibility(timeframe)}
-                      className="h-6 px-2 text-xs"
-                      style={isActive ? { backgroundColor: colors[timeframe], borderColor: colors[timeframe] } : {}}
-                    >
-                      <div className="w-2 h-2 rounded-full mr-1" style={{ backgroundColor: colors[timeframe] }} />
-                      {timeframe.charAt(0).toUpperCase()}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => toggleFocusMode(timeframe)}
-                      className="h-6 w-6 p-0"
-                    >
-                      {isFocused ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
-                    </Button>
-                  </div>
-                )
-              })}
+              <div className="border-l pl-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={resetChartView}
+                  className="h-6 px-2 text-xs bg-transparent"
+                  title="Reset chart view to current price"
+                >
+                  <RotateCcw className="h-3 w-3 mr-1" />
+                  Reset
+                </Button>
+              </div>
             </div>
 
-            <div className="flex items-center gap-2 border-l pl-4">
-              <div className="text-xs space-y-1">
+            {/* Right side: Level controls, zones, and save options */}
+            <div className="flex items-center gap-2">
+              {/* Level visibility toggles */}
+              <div className="flex items-center gap-1">
+                {(["daily", "weekly", "monthly"] as const).map((timeframe) => {
+                  const groupKey = `levels:${timeframe}`
+                  const group = levelGroups[groupKey]
+                  const colors = getChartColors()
+                  const isActive = group?.visible
+                  const isFocused = focusMode === timeframe
+
+                  return (
+                    <div key={timeframe} className="flex items-center gap-1">
+                      <Button
+                        variant={isActive ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => toggleTimeframeVisibility(timeframe)}
+                        className="h-6 px-2 text-xs"
+                        style={isActive ? { backgroundColor: colors[timeframe], borderColor: colors[timeframe] } : {}}
+                      >
+                        <div className="w-2 h-2 rounded-full mr-1" style={{ backgroundColor: colors[timeframe] }} />
+                        {timeframe.charAt(0).toUpperCase()}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => toggleFocusMode(timeframe)}
+                        className="h-6 w-6 p-0"
+                      >
+                        {isFocused ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                      </Button>
+                    </div>
+                  )
+                })}
+              </div>
+
+              {/* Zones toggle */}
+              <div className="flex items-center gap-2 border-l pl-2">
+                <Label htmlFor="zones-toggle" className="text-xs">
+                  Zones
+                </Label>
+                <Switch id="zones-toggle" checked={showZones} onCheckedChange={setShowZones} className="scale-75" />
+              </div>
+
+              {/* Save and snapshots */}
+              <div className="flex items-center gap-2 border-l pl-2">
+                <Dialog open={saveDialogOpen} onOpenChange={setSaveDialogOpen}>
+                  <DialogTrigger asChild>
+                    <Button variant="outline" size="sm" className="h-6 px-2 text-xs bg-transparent">
+                      <Save className="h-3 w-3 mr-1" />
+                      Save
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Save Levels Snapshot</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                      <div>
+                        <Label htmlFor="snapshot-name">Snapshot Name *</Label>
+                        <Input
+                          id="snapshot-name"
+                          value={snapshotName}
+                          onChange={(e) => setSnapshotName(e.target.value)}
+                          placeholder="e.g., TSLA Aug levels"
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="snapshot-note">Note (optional)</Label>
+                        <Textarea
+                          id="snapshot-note"
+                          value={snapshotNote}
+                          onChange={(e) => setSnapshotNote(e.target.value)}
+                          placeholder="Optional description..."
+                        />
+                      </div>
+                      <Button onClick={saveSnapshot} className="w-full">
+                        Save Snapshot
+                      </Button>
+                    </div>
+                  </DialogContent>
+                </Dialog>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowSnapshots(!showSnapshots)}
+                  className="h-6 px-2 text-xs"
+                >
+                  {showSnapshots ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                  Snapshots
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          {Object.entries(levelGroups).filter(
+            ([key, group]) => key.startsWith("levels:") && !key.includes("snapshot") && group.visible,
+          ).length > 0 && (
+            <div className="absolute top-16 left-4 right-4 z-10 bg-background/80 backdrop-blur-sm rounded-lg p-2 border">
+              <div className="flex items-center justify-center gap-4 text-xs">
                 {Object.entries(levelGroups)
                   .filter(([key, group]) => key.startsWith("levels:") && !key.includes("snapshot") && group.visible)
                   .map(([key, group]) => {
@@ -889,88 +986,7 @@ export function ChartContainer() {
                   })}
               </div>
             </div>
-
-            <div className="flex items-center gap-2 border-l pl-4">
-              <Label htmlFor="zones-toggle" className="text-xs">
-                Zones
-              </Label>
-              <Switch id="zones-toggle" checked={showZones} onCheckedChange={setShowZones} className="scale-75" />
-            </div>
-
-            <div className="flex items-center gap-2 border-l pl-4">
-              <Dialog open={saveDialogOpen} onOpenChange={setSaveDialogOpen}>
-                <DialogTrigger asChild>
-                  <Button variant="outline" size="sm">
-                    <Save className="h-3 w-3 mr-1" />
-                    Save
-                  </Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Save Levels Snapshot</DialogTitle>
-                  </DialogHeader>
-                  <div className="space-y-4">
-                    <div>
-                      <Label htmlFor="snapshot-name">Snapshot Name *</Label>
-                      <Input
-                        id="snapshot-name"
-                        value={snapshotName}
-                        onChange={(e) => setSnapshotName(e.target.value)}
-                        placeholder="e.g., TSLA Aug levels"
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="snapshot-note">Note (optional)</Label>
-                      <Textarea
-                        id="snapshot-note"
-                        value={snapshotNote}
-                        onChange={(e) => setSnapshotNote(e.target.value)}
-                        placeholder="Optional description..."
-                      />
-                    </div>
-                    <Button onClick={saveSnapshot} className="w-full">
-                      Save Snapshot
-                    </Button>
-                  </div>
-                </DialogContent>
-              </Dialog>
-
-              <Button variant="outline" size="sm" onClick={() => setShowSnapshots(!showSnapshots)}>
-                {showSnapshots ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-                Snapshots
-              </Button>
-            </div>
-          </div>
-
-          <div className="absolute top-4 left-4 z-10 flex items-center gap-2 bg-background/80 backdrop-blur-sm rounded-lg p-2 border">
-            {/* Timeframe selector */}
-            <div className="flex items-center gap-1">
-              {timeframeOptions.map((option) => (
-                <Button
-                  key={option.value}
-                  variant={timeframe === option.value ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => handleTimeframeChange(option.value)}
-                  className="h-6 px-2 text-xs"
-                >
-                  {option.label}
-                  {option.realTime && <div className="w-1 h-1 bg-green-500 rounded-full ml-1" />}
-                </Button>
-              ))}
-            </div>
-
-            {/* Reset chart view button */}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={resetChartView}
-              className="h-6 px-2 text-xs bg-transparent"
-              title="Reset chart view to current price"
-            >
-              <RotateCcw className="h-3 w-3 mr-1" />
-              Reset View
-            </Button>
-          </div>
+          )}
 
           <div ref={chartContainerRef} className="w-full min-h-[500px] lg:min-h-[70vh]" />
         </CardContent>

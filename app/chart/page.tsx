@@ -34,24 +34,23 @@ export default function ChartPage() {
   return (
     <div className="min-h-screen bg-background">
       <Navigation />
-      <main className="container mx-auto px-4 py-6">
-        <div className="space-y-6">
-          <div className="flex flex-col space-y-2">
-            <h1 className="text-3xl font-bold tracking-tight">Hafid Assistanta Chart</h1>
-            <p className="text-muted-foreground">
-              Search and visualize stocks, forex, and crypto with support and resistance levels using ±1σ and ±2σ bands
-            </p>
+      <main className="container mx-auto p-4">
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 min-h-[calc(100vh-8rem)]">
+          {/* Chart section - takes 2/3 on large screens */}
+          <div className="xl:col-span-2">
+            <ChartContainer />
           </div>
 
-          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-            {/* Chart takes 2/3 width on large screens */}
-            <div className="xl:col-span-2">
-              <ChartContainer />
-            </div>
-
-            {/* AI Chat takes 1/3 width on large screens, full width on mobile */}
-            <div className="xl:col-span-1">
-              <AgentChat />
+          {/* AI Chat section - takes 1/3 on large screens */}
+          <div className="xl:col-span-1">
+            <div className="border rounded-lg bg-card">
+              <div className="p-4 border-b">
+                <h2 className="text-lg font-semibold">AI Assistant</h2>
+                <p className="text-sm text-muted-foreground">Ask me to analyze charts or mark levels</p>
+              </div>
+              <div className="h-[600px]">
+                <AgentChat />
+              </div>
             </div>
           </div>
         </div>
