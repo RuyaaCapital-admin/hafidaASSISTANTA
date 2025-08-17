@@ -88,7 +88,18 @@ export async function GET(request: NextRequest) {
       }
     } catch (error) {
       console.error("[v0] Error fetching chart data:", error)
-      return NextResponse.json({ success: false, error: "Failed to fetch chart data" }, { status: 500 })
+      console.log("[v0] Falling back to sample data due to API error")
+
+      // Return sample data as fallback
+      const sampleData = generateSampleData(symbol, resolution)
+      const responseData = {
+        success: true,
+        meta: { symbol, resolution, isSample: true },
+        candles: sampleData,
+        last: sampleData[sampleData.length - 1]?.close,
+      }
+
+      return NextResponse.json(responseData)
     }
 
     if (chartData.length === 0) {
