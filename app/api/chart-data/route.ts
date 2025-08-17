@@ -135,7 +135,13 @@ async function fetchIntradayData(
 
   const response = await fetch(url)
   if (!response.ok) {
-    throw new Error(`EODHD intraday API error: ${response.status}`)
+    const errorText = await response.text().catch(() => "Unknown error")
+    console.error("[v0] EODHD Intraday API Response:", {
+      status: response.status,
+      statusText: response.statusText,
+      body: errorText.substring(0, 200)
+    })
+    throw new Error(`EODHD intraday API error: ${response.status} - ${response.statusText}`)
   }
 
   const data = await response.json()
@@ -167,7 +173,13 @@ async function fetchDailyData(
 
   const response = await fetch(url)
   if (!response.ok) {
-    throw new Error(`EODHD daily API error: ${response.status}`)
+    const errorText = await response.text().catch(() => "Unknown error")
+    console.error("[v0] EODHD API Response:", {
+      status: response.status,
+      statusText: response.statusText,
+      body: errorText.substring(0, 200)
+    })
+    throw new Error(`EODHD API error: ${response.status} - ${response.statusText}`)
   }
 
   const data: EODHDCandle[] = await response.json()
