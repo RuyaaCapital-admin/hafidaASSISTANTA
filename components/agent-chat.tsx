@@ -117,6 +117,12 @@ export function AgentChat() {
       }
       if (input.trim()) {
         formData.append("message", input)
+        // Pass recent conversation context
+        const recentMessages = messages.slice(-5).map(msg => ({
+          role: msg.type === "user" ? "user" : "assistant",
+          content: msg.content
+        }))
+        formData.append("context", JSON.stringify(recentMessages))
       }
 
       const response = await fetch("/api/ingest", {
