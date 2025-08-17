@@ -719,6 +719,42 @@ export function ChartContainer() {
 
     setAutoMarkLoading(true)
     try {
+      // Try AI analysis first if available
+      const aiAnalysis = await fetch("/api/agent/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          symbol,
+          timeframe,
+          chartData,
+          currentPrice,
+        }),
+      })
+
+      if (aiAnalysis.ok) {
+        const analysisData = await aiAnalysis.json()
+        if (analysisData.success && analysisData.levels) {
+          // Use AI-generated levels
+          const aiLevels = {
+            upper1: parseFloat(analysisData.levels.resistance[0]),
+            upper2: parseFloat(analysisData.levels.resistance[1]),
+            lower1: parseFloat(analysisData.levels.support[0]),
+            lower2: parseFloat(analysisData.levels.support[1]),
+          }
+
+          const validatedLevels = validateLevelsData(aiLevels)
+          if (validatedLevels) {
+            drawLevels(timeframe, validatedLevels)
+            toast({
+              title: "AI Analysis Complete",
+              description: `Smart levels marked for ${symbol} · ${timeframe}`,
+            })
+            return
+          }
+        }
+      }
+
+      // Fallback to traditional calculation
       const result = await markLevels(symbol, timeframe)
 
       if (result.success && result.levels) {
