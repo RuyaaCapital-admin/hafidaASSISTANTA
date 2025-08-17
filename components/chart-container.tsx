@@ -221,14 +221,15 @@ export function ChartContainer() {
 
   const loadSeries = useCallback(
     async (newSymbol: string, newResolution: string) => {
-      // Prevent duplicate calls for same symbol/resolution
-      if (isLoading || (newSymbol === lastLoadedSymbol && newResolution === lastLoadedInterval)) {
+      if (isLoading || !chartRef.current?.candlestickSeries) {
+        console.log("[v0] Skipping load - loading:", isLoading, "chart ready:", !!chartRef.current?.candlestickSeries)
         return
       }
 
-      // Clear any pending timeout
-      if (loadingTimeoutRef.current) {
-        clearTimeout(loadingTimeoutRef.current)
+      // Prevent duplicate calls for same symbol/resolution
+      if (newSymbol === lastLoadedSymbol && newResolution === lastLoadedInterval) {
+        console.log("[v0] Skipping duplicate load for:", newSymbol, newResolution)
+        return
       }
 
       setIsLoading(true)
@@ -236,29 +237,34 @@ export function ChartContainer() {
       setLastLoadedInterval(newResolution)
 
       try {
+        console.log("[v0] Fetching data for:", newSymbol, newResolution)
         const response = await fetch(`/api/chart-data?symbol=${newSymbol}&resolution=${newResolution}`)
+
         if (!response.ok) {
           throw new Error(`Failed to fetch data: ${response.status}`)
         }
 
         const data = await response.json()
+        console.log("[v0] Received data:", data?.candles?.length || 0, "candles")
+
         if (data && data.candles && Array.isArray(data.candles) && data.candles.length > 0) {
-          if (chartRef.current?.candlestickSeries) {
-            chartRef.current.candlestickSeries.setData(data.candles)
+          console.log("[v0] Setting chart data:", data.candles.length, "candles")
+          chartRef.current.candlestickSeries.setData(data.candles)
 
-            // Update current price if available
-            if (data.last) {
-              setCurrentPrice(data.last)
-            }
-
-            // Auto-fit content after data load
-            loadingTimeoutRef.current = setTimeout(() => {
-              if (chartRef.current?.chart) {
-                chartRef.current.chart.timeScale().fitContent()
-              }
-            }, 100)
+          // Update current price if available
+          if (data.last) {
+            setCurrentPrice(data.last)
           }
+
+          // Auto-fit content after data load
+          setTimeout(() => {
+            if (chartRef.current?.chart) {
+              chartRef.current.chart.timeScale().fitContent()
+              console.log("[v0] Chart fitted to content")
+            }
+          }, 200)
         } else {
+          console.error("[v0] No valid chart data received:", data)
           throw new Error("No chart data available")
         }
       } catch (error) {
@@ -311,92 +317,109 @@ export function ChartContainer() {
     [],
   )
 
-  useEffect(() => {
-    if (typeof window !== "undefined" && chartContainerRef.current && !chartRef.current) {
-      import("lightweight-charts").then(({ createChart, CandlestickSeries, LineSeries }) => {
-        try {
-          console.log("[v0] Initializing chart...")
+  const initializeChart = useCallback(() => {
+    if (typeof window === "undefined" || !chartContainerRef.current || chartRef.current) {
+      return
+    }
 
-          if (!chartContainerRef.current || chartRef.current) return
+    import("lightweight-charts").then(({ createChart, CandlestickSeries, LineSeries }) => {
+      try {
+        console.log("[v0] Initializing chart...")
 
-          const containerWidth = chartContainerRef.current.clientWidth || 800
-          const containerHeight = Math.max(500, window.innerHeight * 0.7)
+        const containerWidth = chartContainerRef.current!.clientWidth || 800
+        const containerHeight = Math.max(500, window.innerHeight * 0.7)
 
-          const isDark = document.documentElement.classList.contains("dark")
-          const backgroundColor = isDark ? "#0b0f1a" : "#ffffff"
-          const textColor = isDark ? "#E7EAF3" : "#111827"
-          const gridColor = isDark ? "rgba(231,234,243,0.1)" : "rgba(17,24,39,0.1)"
-          const borderColor = isDark ? "#334155" : "#e2e8f0"
+        const isDark = document.documentElement.classList.contains("dark")
+        const backgroundColor = isDark ? "#0b0f1a" : "#ffffff"
+        const textColor = isDark ? "#E7EAF3" : "#111827"
+        const gridColor = isDark ? "rgba(231,234,243,0.1)" : "rgba(17,24,39,0.1)"
+        const borderColor = isDark ? "#334155" : "#e2e8f0"
 
-          const chart = createChart(chartContainerRef.current, {
-            width: containerWidth,
-            height: containerHeight,
-            layout: {
-              background: { color: backgroundColor },
-              textColor: textColor,
-            },
-            grid: {
-              vertLines: { color: "rgba(0,0,0,0)" },
-              horzLines: { color: gridColor },
-            },
-            crosshair: {
-              mode: 1,
-              vertLine: { color: isDark ? "#6366f1" : "#4f46e5" },
-              horzLine: { color: isDark ? "#6366f1" : "#4f46e5" },
-            },
-            rightPriceScale: {
-              borderColor: borderColor,
-              textColor: textColor,
-              borderVisible: false,
-              scaleMargins: { top: 0.1, bottom: 0.1 },
-            },
-            timeScale: {
-              borderColor: borderColor,
-              textColor: textColor,
-              timeVisible: true,
-              secondsVisible: false,
-              borderVisible: false,
-            },
-          })
+        const chart = createChart(chartContainerRef.current!, {
+          width: containerWidth,
+          height: containerHeight,
+          layout: {
+            background: { color: backgroundColor },
+            textColor: textColor,
+          },
+          grid: {
+            vertLines: { color: "rgba(0,0,0,0)" },
+            horzLines: { color: gridColor },
+          },
+          crosshair: {
+            mode: 1,
+            vertLine: { color: isDark ? "#6366f1" : "#4f46e5" },
+            horzLine: { color: isDark ? "#6366f1" : "#4f46e5" },
+          },
+          rightPriceScale: {
+            borderColor: borderColor,
+            textColor: textColor,
+            borderVisible: false,
+            scaleMargins: { top: 0.1, bottom: 0.1 },
+          },
+          timeScale: {
+            borderColor: borderColor,
+            textColor: textColor,
+            timeVisible: true,
+            secondsVisible: false,
+            borderVisible: false,
+          },
+        })
 
-          const candlestickSeries = chart.addSeries(CandlestickSeries, {
-            upColor: "#22c55e",
-            downColor: "#ef4444",
-            borderDownColor: "#ef4444",
-            borderUpColor: "#22c55e",
-            wickDownColor: "#ef4444",
-            wickUpColor: "#22c55e",
-          })
+        const candlestickSeries = chart.addSeries(CandlestickSeries, {
+          upColor: "#22c55e",
+          downColor: "#ef4444",
+          borderDownColor: "#ef4444",
+          borderUpColor: "#22c55e",
+          wickDownColor: "#ef4444",
+          wickUpColor: "#22c55e",
+        })
 
-          chartRef.current = { chart, candlestickSeries, LineSeries }
+        chartRef.current = { chart, candlestickSeries, LineSeries }
 
+        // Load initial data after chart is ready
+        setTimeout(() => {
           loadSeries(symbol, interval)
+        }, 100)
 
-          const handleResize = () => {
-            if (chartContainerRef.current && chart) {
-              chart.applyOptions({ width: chartContainerRef.current.clientWidth })
-            }
+        const handleResize = () => {
+          if (chartRef.current?.chart && chartContainerRef.current) {
+            const newWidth = chartContainerRef.current.clientWidth || 800
+            const newHeight = Math.max(500, window.innerHeight * 0.7)
+            chartRef.current.chart.applyOptions({
+              width: newWidth,
+              height: newHeight,
+            })
           }
-
-          window.addEventListener("resize", handleResize)
-
-          chartRef.current.cleanup = () => {
-            window.removeEventListener("resize", handleResize)
-            if (chart) chart.remove()
-          }
-        } catch (error) {
-          console.error("[v0] Error initializing chart:", error)
         }
-      })
-    }
 
-    return () => {
-      if (chartRef.current?.cleanup) {
-        chartRef.current.cleanup()
-        chartRef.current = null
+        window.addEventListener("resize", handleResize)
+
+        return () => {
+          window.removeEventListener("resize", handleResize)
+          if (chartRef.current?.chart) {
+            chartRef.current.chart.remove()
+            chartRef.current = null
+          }
+        }
+      } catch (error) {
+        console.error("[v0] Error initializing chart:", error)
       }
+    })
+  }, [symbol, interval, loadSeries])
+
+  useEffect(() => {
+    if (!chartRef.current) {
+      initializeChart()
     }
-  }, [symbol, interval, loadSeries]) // Remove dependencies to prevent re-initialization
+  }, [initializeChart])
+
+  useEffect(() => {
+    if (chartRef.current && (symbol !== lastLoadedSymbol || interval !== lastLoadedInterval)) {
+      console.log("[v0] Loading data for:", symbol, interval)
+      loadSeries(symbol, interval)
+    }
+  }, [symbol, interval, loadSeries, lastLoadedSymbol, lastLoadedInterval])
 
   useEffect(() => {
     applyTheme(isDarkMode ? "dark" : "light")

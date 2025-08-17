@@ -29,7 +29,10 @@ function createOpenAIClient(): OpenAI | null {
     }
 
     console.log("[v0] OpenAI API key validation passed, creating client...")
-    return new OpenAI({ apiKey: trimmedKey })
+    return new OpenAI({
+      apiKey: trimmedKey,
+      dangerouslyAllowBrowser: true,
+    })
   } catch (error) {
     console.error("[v0] Error creating OpenAI client:", error)
     return null
