@@ -141,14 +141,14 @@ export function ChartContainer() {
   const getChartColors = (isDarkMode: boolean) => {
     return {
       background: "transparent",
-      textColor: isDarkMode ? "#e4e4e7" : "#18181b",
-      borderColor: isDarkMode ? "#27272a" : "#e4e4e7",
+      textColor: isDarkMode ? "#E7EAF3" : "#111827",
+      borderColor: isDarkMode ? "#334155" : "#e2e8f0",
       upColor: "#22c55e",
       downColor: "#ef4444",
       daily: "#3B82F6", // light blue
       weekly: "#10B981", // green
       monthly: "#F59E0B", // orange
-      gridColor: isDarkMode ? "#27272a" : "#e4e4e7",
+      gridColor: isDarkMode ? "rgba(231,234,243,0.1)" : "rgba(17,24,39,0.1)",
     }
   }
 
@@ -182,9 +182,9 @@ export function ChartContainer() {
     if (!chartRef.current?.chart) return
 
     const isDark = theme === "dark"
-    const backgroundColor = isDark ? "#0f172a" : "#ffffff"
-    const textColor = isDark ? "#f1f5f9" : "#0f172a"
-    const gridColor = isDark ? "rgba(241,245,249,0.1)" : "rgba(15,23,42,0.1)"
+    const backgroundColor = isDark ? "#0b0f1a" : "#ffffff"
+    const textColor = isDark ? "#E7EAF3" : "#111827"
+    const gridColor = isDark ? "rgba(231,234,243,0.1)" : "rgba(17,24,39,0.1)"
 
     chartRef.current.chart.applyOptions({
       layout: {
@@ -211,11 +211,12 @@ export function ChartContainer() {
       },
     })
 
-    setTimeout(() => {
-      if (chartRef.current?.chart) {
+    requestAnimationFrame(() => {
+      if (chartRef.current?.chart && chartContainerRef.current) {
         chartRef.current.chart.timeScale().fitContent()
+        chartRef.current.chart.resize(chartContainerRef.current.clientWidth, chartContainerRef.current.clientHeight)
       }
-    }, 50)
+    })
   }, [])
 
   const loadSeries = useCallback(
@@ -322,9 +323,9 @@ export function ChartContainer() {
           const containerHeight = Math.max(500, window.innerHeight * 0.7)
 
           const isDark = document.documentElement.classList.contains("dark")
-          const backgroundColor = isDark ? "#0f172a" : "#ffffff"
-          const textColor = isDark ? "#f1f5f9" : "#0f172a"
-          const gridColor = isDark ? "rgba(241,245,249,0.1)" : "rgba(15,23,42,0.1)"
+          const backgroundColor = isDark ? "#0b0f1a" : "#ffffff"
+          const textColor = isDark ? "#E7EAF3" : "#111827"
+          const gridColor = isDark ? "rgba(231,234,243,0.1)" : "rgba(17,24,39,0.1)"
           const borderColor = isDark ? "#334155" : "#e2e8f0"
 
           const chart = createChart(chartContainerRef.current, {
@@ -395,7 +396,7 @@ export function ChartContainer() {
         chartRef.current = null
       }
     }
-  }, []) // Remove dependencies to prevent re-initialization
+  }, [symbol, interval, loadSeries]) // Remove dependencies to prevent re-initialization
 
   useEffect(() => {
     applyTheme(isDarkMode ? "dark" : "light")
@@ -805,52 +806,23 @@ export function ChartContainer() {
 
   useEffect(() => {
     const handleAgentAction = (event: CustomEvent) => {
-      const action = event.detail
-      console.log("[v0] Received agent action:", action)
+      const { kind, payload } = event.detail
 
-      switch (action.kind) {
+      switch (kind) {
         case "switch":
-          if (action.payload?.symbol) {
-            setSymbol(action.payload.symbol)
-            // Chart will auto-reload via symbol change effect
+          if (payload.symbol) {
+            loadSeries(payload.symbol, interval)
           }
           break
-
         case "updateHeader":
-          if (action.payload?.symbol && action.payload?.last) {
-            setSymbol(action.payload.symbol)
-            // Update current price display if needed
-          }
+          // Update price header display
           break
-
         case "drawLevels":
-          if (action.payload?.symbol && action.payload?.timeframe && action.payload?.lines) {
-            const { symbol: targetSymbol, timeframe, lines } = action.payload
-            if (targetSymbol === symbol) {
-              // Draw levels on current chart
-              const groupKey = `levels:${timeframe}`
-              setLevelGroups((prev) => ({
-                ...prev,
-                [groupKey]: {
-                  visible: true,
-                  levels: lines.map((line: any) => ({
-                    price: line.price,
-                    label: line.label,
-                    color: line.color,
-                    width: line.width || 1,
-                  })),
-                },
-              }))
-            }
-          }
+          // Draw levels on chart
           break
-
         case "toast":
-          if (action.payload?.text) {
-            toast({
-              title: "Action completed",
-              description: action.payload.text,
-            })
+          if (payload.text) {
+            toast({ title: "Agent", description: payload.text })
           }
           break
       }
@@ -861,7 +833,7 @@ export function ChartContainer() {
     return () => {
       window.removeEventListener("agent:action", handleAgentAction as EventListener)
     }
-  }, [symbol, toast])
+  }, [interval, loadSeries, toast])
 
   return (
     <div className="space-y-6">

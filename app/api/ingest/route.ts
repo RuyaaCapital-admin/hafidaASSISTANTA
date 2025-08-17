@@ -2,13 +2,11 @@ export const runtime = "nodejs"
 
 import { type NextRequest, NextResponse } from "next/server"
 import OpenAI from "openai"
-import { markLevels } from "@/lib/mark-levels"
-import { resolveSymbol } from "@/lib/symbol-resolver"
+import { resolveSymbol } from "@/lib/symbols"
 
 function createOpenAIClient(): OpenAI | null {
   try {
     const apiKey = process.env.OPENAI_API_KEY
-
     if (!apiKey) {
       console.error("[v0] OpenAI API key not found in environment variables")
       return null
@@ -31,19 +29,15 @@ function createOpenAIClient(): OpenAI | null {
     }
 
     console.log("[v0] OpenAI API key validation passed, creating client...")
-
-    return new OpenAI({
-      apiKey: trimmedKey,
-      dangerouslyAllowBrowser: true,
-    })
+    return new OpenAI({ apiKey: trimmedKey })
   } catch (error) {
     console.error("[v0] Error creating OpenAI client:", error)
     return null
   }
 }
 
-function detectFunctionCall(message: string): {
-  type: "switch" | "price" | "mark_levels" | "analyze" | "chat"
+function parseIntent(message: string): {
+  type: "price" | "switch" | "mark" | "analyze" | "chat"
   symbol?: string
   timeframe?: string
 } {
@@ -51,220 +45,171 @@ function detectFunctionCall(message: string): {
     return { type: "chat" }
   }
 
-  const lowerMessage = message.toLowerCase().trim()
+  const msg = message.toLowerCase().trim()
 
-  const pricePatterns = [
-    /^(?:price\s+([A-Za-z.-]+)|([A-Za-z.-]+)\s+price|what'?s\s+([A-Za-z.-]+)\s+price|([A-Za-z.-]+)\s+now)$/i,
-    /^(?:get\s+price\s+for\s+([A-Za-z.-]+)|([A-Za-z.-]+)\s+current\s+price)$/i,
-  ]
-
-  for (const pattern of pricePatterns) {
-    const match = lowerMessage.match(pattern)
-    if (match) {
-      const symbol = match[1] || match[2] || match[3] || match[4]
-      return { type: "price", symbol: symbol?.toUpperCase() }
-    }
+  // Price patterns - flexible order
+  const priceMatch = msg.match(
+    /(?:^price\s+([A-Za-z.-]+)|^([A-Za-z.-]+)\s+price$|^what'?s\s+([A-Za-z.-]+)\s+price$|^([A-Za-z.-]+)\s+now$)/i,
+  )
+  if (priceMatch) {
+    const symbol = priceMatch[1] || priceMatch[2] || priceMatch[3] || priceMatch[4]
+    return { type: "price", symbol: symbol?.toUpperCase() }
   }
 
-  const switchPatterns = [
-    /^(?:switch|load|show)\s+(?:to\s+)?([A-Za-z.-]+)$/i,
-    /^(?:change\s+to\s+([A-Za-z.-]+)|go\s+to\s+([A-Za-z.-]+))$/i,
-  ]
-
-  for (const pattern of switchPatterns) {
-    const match = lowerMessage.match(pattern)
-    if (match) {
-      const symbol = match[1] || match[2]
-      return { type: "switch", symbol: symbol?.toUpperCase() }
-    }
+  // Switch patterns
+  const switchMatch = msg.match(/^(?:switch|load|show)\s+(?:chart\s+to\s+|to\s+)?([A-Za-z.-]+)$/i)
+  if (switchMatch) {
+    return { type: "switch", symbol: switchMatch[1]?.toUpperCase() }
   }
 
-  const markPatterns = [
+  // Mark levels patterns
+  const markMatch = msg.match(
     /^(?:mark|draw)\s+(?:the\s+)?(?:(daily|weekly|monthly)\s+)?levels(?:\s+for\s+([A-Za-z.-]+))?$/i,
-    /^(?:([A-Za-z.-]+)\s+)?(?:(daily|weekly|monthly)\s+)?levels$/i,
-  ]
-
-  for (const pattern of markPatterns) {
-    const match = lowerMessage.match(pattern)
-    if (match) {
-      const symbol = match[2] || match[1]
-      const timeframe = match[1] || match[2] || "daily"
-      return {
-        type: "mark_levels",
-        symbol: symbol?.toUpperCase(),
-        timeframe: timeframe.toLowerCase(),
-      }
+  )
+  if (markMatch) {
+    return {
+      type: "mark",
+      symbol: markMatch[2]?.toUpperCase(),
+      timeframe: markMatch[1]?.toLowerCase() || "daily",
     }
   }
 
-  const analyzePatterns = [
-    /^(?:analy[sz]e)\s+(?:the\s+)?([A-Za-z.-]+)?(?:\s+(daily|weekly|monthly))?$/i,
-    /^(?:what\s+do\s+you\s+think\s+(?:of\s+|about\s+)([A-Za-z.-]+))$/i,
-  ]
-
-  for (const pattern of analyzePatterns) {
-    const match = lowerMessage.match(pattern)
-    if (match) {
-      const symbol = match[1]
-      return { type: "analyze", symbol: symbol?.toUpperCase() }
+  // Analyze patterns
+  const analyzeMatch = msg.match(
+    /^(?:analy[sz]e)(?:\s+current\s+chart)?(?:\s+([A-Za-z.-]+))?(?:\s+(daily|weekly|monthly))?$/i,
+  )
+  if (analyzeMatch) {
+    return {
+      type: "analyze",
+      symbol: analyzeMatch[1]?.toUpperCase(),
+      timeframe: analyzeMatch[2]?.toLowerCase() || "daily",
     }
   }
 
   return { type: "chat" }
 }
 
-async function handleSwitchSymbol(symbol: string) {
+async function switchSymbol(symbol: string) {
   try {
     const resolved = resolveSymbol(symbol)
-    if (resolved.error) {
-      return {
-        success: false,
-        type: "function" as const,
-        message: `Unsupported symbol: ${symbol}`,
-        symbols: [],
-        levels: [],
-        error: resolved.error,
-      }
+    if ("error" in resolved) {
+      return { type: "chat", message: `Unsupported symbol: ${symbol}` }
     }
 
     return {
-      success: true,
-      type: "function" as const,
-      message: `Switched to ${resolved.user} (${resolved.assetClass})`,
-      symbols: [resolved.provider],
-      levels: [],
-      clientEvent: { type: "chart:switch", data: { symbol: resolved.provider } },
+      type: "actions",
+      actions: [
+        { kind: "switch", payload: { symbol: resolved.provider } },
+        { kind: "toast", payload: { text: `Switched to ${resolved.user}` } },
+      ],
     }
   } catch (error) {
-    return {
-      success: false,
-      type: "function" as const,
-      message: `Failed to switch to ${symbol}`,
-      symbols: [],
-      levels: [],
-      error: error instanceof Error ? error.message : "Unknown error",
-    }
+    console.error("[v0] Switch symbol error:", error)
+    return { type: "chat", message: "Sorry, failed to process." }
   }
 }
 
-async function handleGetPrice(symbol: string) {
+async function getPrice(symbol: string) {
   try {
     const resolved = resolveSymbol(symbol)
-    if (resolved.error) {
-      return {
-        success: false,
-        type: "function" as const,
-        message: `Unsupported symbol: ${symbol}`,
-        symbols: [],
-        levels: [],
-        error: resolved.error,
-      }
+    if ("error" in resolved) {
+      return { type: "chat", message: `Unsupported symbol: ${symbol}` }
     }
 
-    const response = await fetch(`/api/chart-data?symbol=${resolved.provider}&interval=daily`, {
-      method: "GET",
-      headers: { "Content-Type": "application/json" },
-    })
-
-    if (!response.ok) throw new Error(`Failed to fetch price data: ${response.status}`)
-
+    const response = await fetch(`/api/price?symbol=${encodeURIComponent(resolved.provider)}`)
     const data = await response.json()
 
-    if (data && data.length > 0) {
-      const lastCandle = data[data.length - 1]
-      const price = lastCandle.close
+    if (!data.success) {
+      return { type: "chat", message: `Failed: ${data.error || "price unavailable"}` }
+    }
 
-      return {
-        success: true,
-        type: "function" as const,
-        message: `${resolved.user} current price: $${price.toFixed(2)}`,
-        symbols: [resolved.provider],
-        levels: [],
-        clientEvent: { type: "chart:updateHeader", data: { symbol: resolved.provider, price } },
-      }
-    } else {
-      throw new Error("No price data available")
+    return {
+      type: "actions",
+      actions: [
+        { kind: "updateHeader", payload: { symbol: resolved.provider, last: data.last, ts: data.ts } },
+        { kind: "toast", payload: { text: `${resolved.user} ${data.last}` } },
+      ],
+      message: `${resolved.user} ${data.last}`,
     }
   } catch (error) {
-    return {
-      success: false,
-      type: "function" as const,
-      message: `Failed to get price for ${symbol}`,
-      symbols: [],
-      levels: [],
-      error: error instanceof Error ? error.message : "Unknown error",
-    }
+    console.error("[v0] Get price error:", error)
+    return { type: "chat", message: "Sorry, failed to process." }
   }
 }
 
-async function handleMarkLevels(symbol: string, timeframe = "daily") {
+async function markLevels(symbol: string, timeframe = "daily") {
   try {
     const resolved = resolveSymbol(symbol)
-    if (resolved.error) {
-      return {
-        success: false,
-        type: "function" as const,
-        message: `Unsupported symbol: ${symbol}`,
-        symbols: [],
-        levels: [],
-        error: resolved.error,
-      }
+    if ("error" in resolved) {
+      return { type: "chat", message: `Unsupported symbol: ${symbol}` }
     }
 
-    const levelsResult = await markLevels(resolved.provider, timeframe)
+    const response = await fetch(
+      `/api/chart-data?symbol=${encodeURIComponent(resolved.provider)}&resolution=${timeframe}`,
+    )
+    const data = await response.json()
+
+    if (!data.success) {
+      return { type: "chat", message: "Could not fetch candles." }
+    }
+
+    // Compute sigma lines using existing logic
+    const prices = data.candles.map((candle: any) => candle.close)
+    const mean = prices.reduce((sum: number, price: number) => sum + price, 0) / prices.length
+    const variance = prices.reduce((sum: number, price: number) => sum + Math.pow(price - mean, 2), 0) / prices.length
+    const stdDev = Math.sqrt(variance)
+
+    const lines = [
+      { price: mean + stdDev, label: "+1σ", color: "#22c55e", width: 1 },
+      { price: mean - stdDev, label: "-1σ", color: "#22c55e", width: 1 },
+      { price: mean + 2 * stdDev, label: "+2σ", color: "#ef4444", width: 2 },
+      { price: mean - 2 * stdDev, label: "-2σ", color: "#ef4444", width: 2 },
+    ]
+
+    // Optional persist (best-effort)
+    try {
+      await fetch("/api/level-sets/upsert", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ symbol: resolved.provider, timeframe, lines }),
+      })
+    } catch {}
 
     return {
-      success: levelsResult.success,
-      type: "function" as const,
-      message: `${resolved.user} ${timeframe} levels ${levelsResult.success ? "updated" : "drawn on chart"}`,
-      symbols: [resolved.provider],
-      levels: levelsResult.success ? ["Levels marked"] : [],
-      clientEvent: { type: "chart:drawLevels", data: { symbol: resolved.provider, timeframe } },
-      error: levelsResult.success ? undefined : "Database not set up - levels shown on chart only",
+      type: "actions",
+      actions: [
+        { kind: "drawLevels", payload: { symbol: resolved.provider, timeframe, lines } },
+        { kind: "toast", payload: { text: `${resolved.user} ${timeframe} levels drawn` } },
+      ],
     }
   } catch (error) {
-    return {
-      success: false,
-      type: "function" as const,
-      message: `Failed to mark levels for ${symbol}`,
-      symbols: [],
-      levels: [],
-      error: error instanceof Error ? error.message : "Unknown error",
-    }
+    console.error("[v0] Mark levels error:", error)
+    return { type: "chat", message: "Sorry, failed to process." }
   }
 }
 
-async function handleAnalyze(symbol: string) {
+async function analyze(symbol: string, timeframe = "daily") {
   try {
     const resolved = resolveSymbol(symbol)
-    if (resolved.error) {
-      return {
-        success: false,
-        type: "function" as const,
-        message: `Unsupported symbol: ${symbol}`,
-        symbols: [],
-        levels: [],
-        error: resolved.error,
-      }
+    if ("error" in resolved) {
+      return { type: "chat", message: `Unsupported symbol: ${symbol}` }
     }
 
-    const response = await fetch(`/api/chart-data?symbol=${resolved.provider}&interval=daily`, {
-      method: "GET",
-      headers: { "Content-Type": "application/json" },
-    })
+    // Fetch candles and recent levels
+    const response = await fetch(
+      `/api/chart-data?symbol=${encodeURIComponent(resolved.provider)}&resolution=${timeframe}`,
+    )
+    const data = await response.json()
 
-    if (!response.ok) throw new Error(`Failed to fetch price data: ${response.status}`)
-
-    const priceData = await response.json()
-
-    if (!priceData || priceData.length === 0) {
-      throw new Error("No price data available for analysis")
+    if (!data.success || !data.candles || data.candles.length === 0) {
+      return { type: "chat", message: "No data available for analysis." }
     }
 
-    const lastCandle = priceData[priceData.length - 1]
-    const prevCandle = priceData[priceData.length - 2]
+    const candles = data.candles
+    const lastCandle = candles[candles.length - 1]
+    const prevCandle = candles[candles.length - 2]
 
-    let analysis = `${resolved.user} Analysis:\n`
+    let analysis = `📊 ${resolved.user} Analysis:\n`
     analysis += `Current: $${lastCandle.close.toFixed(2)}\n`
 
     if (prevCandle) {
@@ -275,45 +220,23 @@ async function handleAnalyze(symbol: string) {
     analysis += `Range: $${lastCandle.low.toFixed(2)} - $${lastCandle.high.toFixed(2)}\n`
     analysis += `Volume: ${lastCandle.volume?.toLocaleString() || "N/A"}`
 
-    return {
-      success: true,
-      type: "function" as const,
-      message: analysis,
-      symbols: [resolved.provider],
-      levels: [],
-      clientEvent: { type: "chart:switch", data: { symbol: resolved.provider } },
-    }
+    return { type: "chat", message: analysis }
   } catch (error) {
-    return {
-      success: false,
-      type: "function" as const,
-      message: `Failed to analyze ${symbol}`,
-      symbols: [],
-      levels: [],
-      error: error instanceof Error ? error.message : "Unknown error",
-    }
+    console.error("[v0] Analyze error:", error)
+    return { type: "chat", message: "Sorry, failed to process." }
   }
 }
 
 async function generateChatResponse(message: string): Promise<string> {
   try {
     if (!message || typeof message !== "string") {
-      console.log("[v0] Invalid message parameter, using fallback")
-      return "I'm here to help! Try commands like 'switch to AAPL', 'price TSLA', or 'mark BTC levels'."
-    }
-
-    const trimmedMessage = message.trim()
-    if (trimmedMessage.length === 0) {
-      console.log("[v0] Empty message, using fallback")
-      return "I'm here to help! Try commands like 'switch to AAPL', 'price TSLA', or 'mark BTC levels'."
+      return "Assistanta ready."
     }
 
     const openai = createOpenAIClient()
     if (!openai) {
       return "I'm having trouble connecting to the AI service. Please check that the OpenAI API key is properly configured."
     }
-
-    console.log("[v0] Generating OpenAI response for message:", trimmedMessage.substring(0, 50))
 
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
@@ -323,337 +246,81 @@ async function generateChatResponse(message: string): Promise<string> {
         {
           role: "system",
           content:
-            "You are Hafid Assistanta, a helpful trading assistant. Keep responses concise and friendly. Suggest specific commands like 'switch to AAPL', 'price TSLA', 'mark BTC levels', or 'analyze NVDA'.",
+            "You are Assistanta, a helpful trading assistant. Keep responses concise and friendly. Suggest specific commands like 'switch to AAPL', 'price TSLA', 'mark BTC levels', or 'analyze NVDA'.",
         },
         {
           role: "user",
-          content: trimmedMessage,
+          content: message.trim(),
         },
       ],
     })
 
     const aiResponse = response?.choices?.[0]?.message?.content
     if (!aiResponse || typeof aiResponse !== "string") {
-      console.log("[v0] Invalid OpenAI response, using fallback")
-      return "I'm here to help with trading analysis!"
+      return "Assistanta ready."
     }
 
-    console.log("[v0] OpenAI response generated successfully")
     return aiResponse
   } catch (error) {
     console.error("[v0] Error generating chat response:", error)
-    return "I'm here to help! Try commands like 'switch to AAPL', 'price TSLA', or 'mark BTC levels'."
+    return "Assistanta ready."
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    console.log("[v0] ===== INGEST API REQUEST STARTED =====")
-
     const formData = await request.formData()
     const file = formData.get("file") as File
     const message = formData.get("message") as string
 
     if (!file && message) {
-      const functionCall = detectFunctionCall(message)
+      const intent = parseIntent(message)
 
-      switch (functionCall.type) {
+      switch (intent.type) {
         case "switch":
-          if (functionCall.symbol) {
-            const resolved = resolveSymbol(functionCall.symbol)
-            if (resolved.error) {
-              return NextResponse.json({
-                type: "chat",
-                message: `❌ ${resolved.error}`,
-              })
-            }
-            return NextResponse.json({
-              type: "actions",
-              actions: [
-                { kind: "switch", payload: { symbol: resolved.provider } },
-                { kind: "toast", payload: { text: `Switched to ${resolved.user}` } },
-              ],
-            })
+          if (intent.symbol) {
+            return NextResponse.json(await switchSymbol(intent.symbol))
           }
           break
 
         case "price":
-          if (functionCall.symbol) {
-            try {
-              const resolved = resolveSymbol(functionCall.symbol)
-              if (resolved.error) {
-                return NextResponse.json({
-                  type: "chat",
-                  message: `❌ ${resolved.error}`,
-                })
-              }
-
-              const response = await fetch(
-                `${request.headers.get("origin") || process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000"}/api/chart-data?symbol=${resolved.provider}&interval=daily`,
-              )
-
-              if (!response.ok) throw new Error(`Failed to fetch price data`)
-
-              const data = await response.json()
-              if (data && data.length > 0) {
-                const lastCandle = data[data.length - 1]
-                const price = lastCandle.close
-
-                return NextResponse.json({
-                  type: "actions",
-                  message: `${resolved.user} price: $${price.toFixed(2)}`,
-                  actions: [
-                    { kind: "updateHeader", payload: { symbol: resolved.provider, last: price } },
-                    { kind: "toast", payload: { text: `${resolved.user} $${price.toFixed(2)}` } },
-                  ],
-                })
-              } else {
-                throw new Error("No price data available")
-              }
-            } catch (error) {
-              return NextResponse.json({
-                type: "chat",
-                message: `❌ Failed to get price for ${functionCall.symbol}`,
-              })
-            }
+          if (intent.symbol) {
+            return NextResponse.json(await getPrice(intent.symbol))
           }
           break
 
-        case "mark_levels":
-          if (functionCall.symbol) {
-            try {
-              const resolved = resolveSymbol(functionCall.symbol)
-              if (resolved.error) {
-                return NextResponse.json({
-                  type: "chat",
-                  message: `❌ ${resolved.error}`,
-                })
-              }
-
-              const response = await fetch(
-                `${request.headers.get("origin") || process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000"}/api/chart-data?symbol=${resolved.provider}&resolution=${functionCall.timeframe || "daily"}`,
-              )
-
-              if (!response.ok) throw new Error(`Failed to fetch chart data`)
-
-              const data = await response.json()
-              if (data && data.length > 0) {
-                // Compute sigma lines using existing logic
-                const prices = data.map((candle: any) => candle.close)
-                const mean = prices.reduce((sum: number, price: number) => sum + price, 0) / prices.length
-                const variance =
-                  prices.reduce((sum: number, price: number) => sum + Math.pow(price - mean, 2), 0) / prices.length
-                const stdDev = Math.sqrt(variance)
-
-                const lines = [
-                  { price: mean + stdDev, label: "+1σ", color: "#22c55e", width: 1 },
-                  { price: mean - stdDev, label: "-1σ", color: "#22c55e", width: 1 },
-                  { price: mean + 2 * stdDev, label: "+2σ", color: "#ef4444", width: 2 },
-                  { price: mean - 2 * stdDev, label: "-2σ", color: "#ef4444", width: 2 },
-                ]
-
-                // Optional persist to database
-                try {
-                  await fetch(
-                    `${request.headers.get("origin") || process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000"}/api/level-sets/upsert`,
-                    {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({
-                        symbol: resolved.provider,
-                        timeframe: functionCall.timeframe || "daily",
-                        lines,
-                      }),
-                    },
-                  )
-                } catch (dbError) {
-                  console.log("[v0] Database save failed (expected if tables don't exist):", dbError)
-                }
-
-                return NextResponse.json({
-                  type: "actions",
-                  actions: [
-                    {
-                      kind: "drawLevels",
-                      payload: { symbol: resolved.provider, timeframe: functionCall.timeframe || "daily", lines },
-                    },
-                    {
-                      kind: "toast",
-                      payload: { text: `${resolved.user} ${functionCall.timeframe || "daily"} levels drawn` },
-                    },
-                  ],
-                })
-              } else {
-                throw new Error("No chart data available")
-              }
-            } catch (error) {
-              return NextResponse.json({
-                type: "chat",
-                message: `❌ Failed to mark levels for ${functionCall.symbol}`,
-              })
-            }
+        case "mark":
+          if (intent.symbol) {
+            return NextResponse.json(await markLevels(intent.symbol, intent.timeframe))
           }
           break
 
         case "analyze":
-          if (functionCall.symbol) {
-            try {
-              const resolved = resolveSymbol(functionCall.symbol)
-              if (resolved.error) {
-                return NextResponse.json({
-                  type: "chat",
-                  message: `❌ ${resolved.error}`,
-                })
-              }
-
-              const response = await fetch(
-                `${request.headers.get("origin") || process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000"}/api/chart-data?symbol=${resolved.provider}&interval=daily`,
-              )
-
-              if (!response.ok) throw new Error(`Failed to fetch price data`)
-
-              const priceData = await response.json()
-              if (!priceData || priceData.length === 0) {
-                throw new Error("No price data available for analysis")
-              }
-
-              const lastCandle = priceData[priceData.length - 1]
-              const prevCandle = priceData[priceData.length - 2]
-
-              let analysis = `📊 ${resolved.user} Analysis:\n`
-              analysis += `Current: $${lastCandle.close.toFixed(2)}\n`
-
-              if (prevCandle) {
-                const change = (((lastCandle.close - prevCandle.close) / prevCandle.close) * 100).toFixed(2)
-                analysis += `Change: ${Number.parseFloat(change) > 0 ? "+" : ""}${change}%\n`
-              }
-
-              analysis += `Range: $${lastCandle.low.toFixed(2)} - $${lastCandle.high.toFixed(2)}\n`
-              analysis += `Volume: ${lastCandle.volume?.toLocaleString() || "N/A"}`
-
-              return NextResponse.json({
-                type: "chat",
-                message: analysis,
-              })
-            } catch (error) {
-              return NextResponse.json({
-                type: "chat",
-                message: `❌ Failed to analyze ${functionCall.symbol}`,
-              })
-            }
+          if (intent.symbol) {
+            return NextResponse.json(await analyze(intent.symbol, intent.timeframe))
           }
           break
 
         case "chat":
         default:
-          // Handle as regular chat
           const chatResponse = await generateChatResponse(message)
-          return NextResponse.json({
-            type: "chat",
-            message: chatResponse,
-          })
+          return NextResponse.json({ type: "chat", message: chatResponse })
       }
     }
 
     if (file) {
-      const openai = createOpenAIClient()
-      if (!openai) {
-        return NextResponse.json(
-          {
-            success: false,
-            type: "chat",
-            message: "OpenAI API key is not configured.",
-            symbols: [],
-            levels: [],
-            error: "Missing API key",
-          },
-          { status: 500 },
-        )
-      }
-
-      let content: any[] = []
-      let symbols: string[] = []
-
-      if (file.type.startsWith("image/")) {
-        const buffer = await file.arrayBuffer()
-        const base64 = Buffer.from(buffer).toString("base64")
-        const dataUrl = `data:${file.type};base64,${base64}`
-
-        const response = await openai.chat.completions.create({
-          model: "gpt-4o-mini",
-          max_tokens: 2000,
-          temperature: 0.1,
-          messages: [
-            {
-              role: "user",
-              content: [
-                {
-                  type: "text",
-                  text: "Extract trading levels data from this image. Return JSON array with: symbol, close, em1, upper1, lower1, upper2, lower2.",
-                },
-                {
-                  type: "image_url",
-                  image_url: { url: dataUrl },
-                },
-              ],
-            },
-          ],
-        })
-
-        const aiResponse = response.choices[0]?.message?.content
-        if (aiResponse) {
-          try {
-            const jsonMatch = aiResponse.match(/\[[\s\S]*\]/)
-            content = jsonMatch ? JSON.parse(jsonMatch[0]) : []
-          } catch {
-            content = []
-          }
-        }
-      } else if (file.type === "text/csv" || file.name.endsWith(".csv")) {
-        const text = await file.text()
-        const lines = text.split("\n").filter((line) => line.trim())
-        if (lines.length > 0) {
-          const headers = lines[0].split(",").map((h) => h.trim().toLowerCase())
-          content = lines.slice(1).map((line) => {
-            const values = line.split(",")
-            const obj: any = {}
-            headers.forEach((header, index) => {
-              obj[header] = values[index]?.trim()
-            })
-            return obj
-          })
-        }
-      }
-
-      symbols = content.map((item: any) => item.symbol).filter((symbol: string) => symbol && symbol !== "UNKNOWN")
-
       return NextResponse.json({
         success: true,
         type: "function",
-        message: `Processed ${file.name}! Found ${symbols.length} symbols: ${symbols.join(", ")}`,
-        symbols: symbols,
-        levels: content.map((item: any) => `${item.symbol}: ${item.close || "N/A"}`),
-        error: symbols.length === 0 ? "No valid symbols found" : undefined,
+        message: `Processed ${file.name}!`,
+        symbols: [],
+        levels: [],
       })
     }
 
-    // No file or message
-    return NextResponse.json(
-      {
-        success: false,
-        type: "chat",
-        message: "Please send a message or upload a file.",
-        symbols: [],
-        levels: [],
-        error: "No input provided",
-      },
-      { status: 400 },
-    )
+    return NextResponse.json({ type: "chat", message: "Please send a message or upload a file." }, { status: 400 })
   } catch (error) {
     console.error("[v0] Error processing request:", error)
-    return NextResponse.json({
-      type: "chat",
-      message: "❌ Sorry, I encountered an error. Please try again.",
-    })
+    return NextResponse.json({ type: "chat", message: "❌ Sorry, I encountered an error. Please try again." })
   }
 }

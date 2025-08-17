@@ -25,8 +25,7 @@ export function AgentChat() {
     {
       id: "1",
       type: "assistant",
-      content:
-        "Hello! I'm Hafid Assistanta. Try: 'switch to AAPL', 'price TSLA', 'mark BTC weekly levels', or 'analyze NVDA'",
+      content: "Assistanta ready.",
       timestamp: new Date(),
     },
   ])
@@ -139,7 +138,7 @@ export function AgentChat() {
         const assistantMessage: Message = {
           id: (Date.now() + 1).toString(),
           type: "assistant",
-          content: result.message || "I'm here to help!",
+          content: result.message || "Assistanta ready.",
           timestamp: new Date(),
         }
         setMessages((prev) => [...prev, assistantMessage])
