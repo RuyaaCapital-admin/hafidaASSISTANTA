@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { createChart, IChartApi, ISeriesApi } from "lightweight-charts"
+import { createChart, CandlestickSeries, IChartApi, ISeriesApi } from "lightweight-charts"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/hooks/use-toast"
 import { resolveSymbol } from "@/lib/symbol-resolver"
@@ -42,7 +42,7 @@ export function ChartContainer({ symbol: initial }: { symbol: string }) {
       },
       grid: { vertLines: { color: "transparent" }, horzLines: { color: "transparent" } },
     })
-    const series = chart.addCandlestickSeries()
+    const series = chart.addSeries(CandlestickSeries)
     chartRef.current = chart
     seriesRef.current = series
     loadCandles(symbol, resolution)
