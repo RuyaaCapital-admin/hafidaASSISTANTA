@@ -279,20 +279,30 @@ PERSONALITY:
 
 Respond naturally and conversationally. If the user asks about prices or data I cannot access, I'll suggest using the proper commands.`
 
+    // Build conversation history
+    const messages: any[] = [
+      {
+        role: "system",
+        content: systemPrompt,
+      }
+    ]
+
+    // Add conversation context if available
+    if (context && Array.isArray(context) && context.length > 0) {
+      messages.push(...context.slice(-4)) // Last 4 messages for context
+    }
+
+    // Add current message
+    messages.push({
+      role: "user",
+      content: message.trim(),
+    })
+
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       max_tokens: 400,
       temperature: 0.7,
-      messages: [
-        {
-          role: "system",
-          content: systemPrompt,
-        },
-        {
-          role: "user",
-          content: message.trim(),
-        },
-      ],
+      messages,
     })
 
     const aiResponse = response?.choices?.[0]?.message?.content
