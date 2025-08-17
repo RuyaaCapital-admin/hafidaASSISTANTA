@@ -419,14 +419,10 @@ export function ChartContainer() {
   }, [])
 
   useEffect(() => {
-    const initChart = () => {
-      if (!chartRef.current) {
-        initializeChart()
-      }
+    // Initialize chart only once
+    if (!chartRef.current && chartContainerRef.current) {
+      initializeChart()
     }
-
-    // Only initialize once
-    initChart()
 
     // Cleanup on unmount
     return () => {
@@ -439,7 +435,7 @@ export function ChartContainer() {
         }
       }
     }
-  }, [])
+  }, []) // Empty dependency array - only run once
 
   useEffect(() => {
     if (chartRef.current && (symbol !== lastLoadedSymbol || interval !== lastLoadedInterval)) {
