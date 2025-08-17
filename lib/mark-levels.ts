@@ -33,18 +33,23 @@ export async function markLevels(symbol: string, timeframe: string): Promise<Mar
     }
 
     const responseData = await response.json()
+    console.log("[v0] markLevels API response:", responseData)
+
     if (!responseData || !responseData.success || !responseData.candles || responseData.candles.length === 0) {
-      throw new Error("No price data available")
+      throw new Error(`No price data available for ${symbol}. Response: ${JSON.stringify(responseData)}`)
     }
 
     const data = responseData.candles
     const latestCandle = data[data.length - 1]
 
-    if (!latestCandle || typeof latestCandle.close === 'undefined') {
-      throw new Error("Invalid candle data - missing close price")
+    if (!latestCandle || typeof latestCandle.close === 'undefined' || latestCandle.close === null) {
+      throw new Error(`Invalid candle data - missing close price. Latest candle: ${JSON.stringify(latestCandle)}`)
     }
 
-    const close = latestCandle.close
+    const close = parseFloat(latestCandle.close)
+    if (isNaN(close) || close <= 0) {
+      throw new Error(`Invalid close price: ${latestCandle.close}`)
+    }
 
     // Calculate time factor based on timeframe
     let T: number
