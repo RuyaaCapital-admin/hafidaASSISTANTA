@@ -318,8 +318,18 @@ export function ChartContainer() {
   )
 
   const initializeChart = useCallback(() => {
-    if (typeof window === "undefined" || !chartContainerRef.current || chartRef.current) {
+    if (typeof window === "undefined" || !chartContainerRef.current) {
       return
+    }
+
+    // Clear any existing chart instance first
+    if (chartRef.current?.chart) {
+      try {
+        chartRef.current.chart.remove()
+        chartRef.current = null
+      } catch (error) {
+        console.warn("[v0] Error removing existing chart:", error)
+      }
     }
 
     import("lightweight-charts").then(({ createChart, CandlestickSeries, LineSeries }) => {
@@ -327,10 +337,10 @@ export function ChartContainer() {
         console.log("[v0] Initializing chart...")
 
         const containerWidth = chartContainerRef.current!.clientWidth || 800
-        const containerHeight = Math.max(500, window.innerHeight * 0.7)
+        const containerHeight = Math.max(500, 600)
 
         const isDark = document.documentElement.classList.contains("dark")
-        const backgroundColor = isDark ? "#0b0f1a" : "#ffffff"
+        const backgroundColor = isDark ? "#0f172a" : "#ffffff"
         const textColor = isDark ? "#E7EAF3" : "#111827"
         const gridColor = isDark ? "rgba(231,234,243,0.1)" : "rgba(17,24,39,0.1)"
         const borderColor = isDark ? "#334155" : "#e2e8f0"
@@ -385,7 +395,7 @@ export function ChartContainer() {
         const handleResize = () => {
           if (chartRef.current?.chart && chartContainerRef.current) {
             const newWidth = chartContainerRef.current.clientWidth || 800
-            const newHeight = Math.max(500, window.innerHeight * 0.7)
+            const newHeight = Math.max(500, 600)
             chartRef.current.chart.applyOptions({
               width: newWidth,
               height: newHeight,
@@ -406,7 +416,7 @@ export function ChartContainer() {
         console.error("[v0] Error initializing chart:", error)
       }
     })
-  }, [symbol, interval, loadSeries])
+  }, [])
 
   useEffect(() => {
     if (!chartRef.current) {
