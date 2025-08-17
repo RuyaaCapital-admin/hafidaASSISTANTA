@@ -230,10 +230,10 @@ async function analyze(symbol: string, timeframe = "daily") {
   }
 }
 
-async function generateChatResponse(message: string): Promise<string> {
+async function generateChatResponse(message: string, context?: any): Promise<string> {
   try {
     if (!message || typeof message !== "string") {
-      return "Assistanta ready."
+      return "I'm your trading assistant ready to help! Try commands like:\n• 'price BTC' or 'Bitcoin price'\n• 'switch to AAPL'\n• 'mark daily levels'\n• 'analyze current chart'"
     }
 
     const openai = createOpenAIClient()
@@ -241,15 +241,52 @@ async function generateChatResponse(message: string): Promise<string> {
       return "I'm having trouble connecting to the AI service. Please check that the OpenAI API key is properly configured."
     }
 
+    // Get current date and time
+    const now = new Date()
+    const dateStr = now.toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    })
+    const timeStr = now.toLocaleTimeString('en-US')
+
+    const systemPrompt = `You are Assistanta, an intelligent trading assistant with these capabilities:
+
+CURRENT CONTEXT:
+- Date: ${dateStr}
+- Time: ${timeStr}
+- Location: Trading Platform
+- I can: analyze charts, get prices, switch symbols, mark levels, handle multiple languages
+
+SYMBOL RECOGNITION:
+- I understand: BTC/Bitcoin/بيتكوين, ETH/Ethereum, AAPL, TSLA, NVDA, etc.
+- I support: Stocks (.US), Crypto (-USD.CC), Forex (.FOREX)
+
+AVAILABLE COMMANDS:
+- "price [symbol]" or "[symbol] price" - Get current price
+- "switch to [symbol]" - Change chart symbol
+- "mark [timeframe] levels" - Draw support/resistance
+- "analyze [symbol]" - Technical analysis
+- General chat - I can discuss trading, markets, explain concepts
+
+PERSONALITY:
+- Professional but conversational
+- Never lie or make up data
+- If I don't know something, I'll say so
+- I remember our conversation context
+- I provide actionable insights
+
+Respond naturally and conversationally. If the user asks about prices or data I cannot access, I'll suggest using the proper commands.`
+
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
-      max_tokens: 300,
+      max_tokens: 400,
       temperature: 0.7,
       messages: [
         {
           role: "system",
-          content:
-            "You are Assistanta, a helpful trading assistant. Keep responses concise and friendly. Suggest specific commands like 'switch to AAPL', 'price TSLA', 'mark BTC levels', or 'analyze NVDA'.",
+          content: systemPrompt,
         },
         {
           role: "user",
@@ -260,13 +297,13 @@ async function generateChatResponse(message: string): Promise<string> {
 
     const aiResponse = response?.choices?.[0]?.message?.content
     if (!aiResponse || typeof aiResponse !== "string") {
-      return "Assistanta ready."
+      return "I'm ready to help with your trading analysis!"
     }
 
     return aiResponse
   } catch (error) {
     console.error("[v0] Error generating chat response:", error)
-    return "Assistanta ready."
+    return "I'm experiencing some technical difficulties. Please try again or use specific commands like 'price BTC' or 'switch to AAPL'."
   }
 }
 
