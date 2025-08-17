@@ -44,12 +44,13 @@ export async function GET(request: NextRequest) {
     const symbol = resolved.provider
     console.log("[v0] Processing symbol:", symbolParam, "-> resolved:", symbol)
 
-    const cacheKey = `${symbol}-${resolution}-${from}-${to}`
-    const now = Date.now()
-    const cached = cache.get(cacheKey)
+    // Check cache first
+    const cacheKey = `${symbol}-${resolution}-${from || 'default'}-${to || 'default'}`
+    const cached = cacheUtils.getCachedChartData(symbol, cacheKey)
 
-    if (cached && cached.expires > now) {
-      return NextResponse.json(cached.data)
+    if (cached) {
+      console.log("[v0] Returning cached data for:", symbol)
+      return NextResponse.json(cached)
     }
 
     const apiKey = process.env.EODHD_API_KEY
