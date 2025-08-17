@@ -337,7 +337,7 @@ export function ChartContainer() {
         console.log("[v0] Initializing chart...")
 
         const containerWidth = chartContainerRef.current!.clientWidth || 800
-        const containerHeight = Math.max(500, 600)
+        const containerHeight = 600 // Fixed height to prevent expansion
 
         const isDark = document.documentElement.classList.contains("dark")
         const backgroundColor = isDark ? "#020617" : "#ffffff" // Much darker background
