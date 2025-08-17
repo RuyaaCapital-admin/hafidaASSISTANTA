@@ -4,7 +4,7 @@ import type React from "react"
 import { useState, useRef, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Upload, Send, ImageIcon, FileText, Loader2, Activity } from "lucide-react"
+import { Upload, Send, ImageIcon, FileText, Loader2, Activity, Download, Trash2 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
 interface Message {
