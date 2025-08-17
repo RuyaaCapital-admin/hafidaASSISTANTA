@@ -50,42 +50,70 @@ function parseIntent(message: string): {
 
   const msg = message.toLowerCase().trim()
 
-  // Price patterns - flexible order
-  const priceMatch = msg.match(
-    /(?:^price\s+([A-Za-z.-]+)|^([A-Za-z.-]+)\s+price$|^what'?s\s+([A-Za-z.-]+)\s+price$|^([A-Za-z.-]+)\s+now$)/i,
-  )
-  if (priceMatch) {
-    const symbol = priceMatch[1] || priceMatch[2] || priceMatch[3] || priceMatch[4]
-    return { type: "price", symbol: symbol?.toUpperCase() }
-  }
+  // Enhanced price patterns - more flexible
+  const pricePatterns = [
+    /(?:^price\s+([A-Za-z.\-\u0600-\u06FF]+))/i,
+    /(?:^([A-Za-z.\-\u0600-\u06FF]+)\s+price$)/i,
+    /(?:what'?s\s+([A-Za-z.\-\u0600-\u06FF]+)\s+(?:price|cost|value))/i,
+    /(?:^([A-Za-z.\-\u0600-\u06FF]+)\s+now$)/i,
+    /(?:how\s+much\s+(?:is\s+)?([A-Za-z.\-\u0600-\u06FF]+))/i,
+    /(?:current\s+price\s+(?:of\s+)?([A-Za-z.\-\u0600-\u06FF]+))/i,
+    /(?:^([A-Za-z.\-\u0600-\u06FF]+)\s+\$)/i,
+  ]
 
-  // Switch patterns
-  const switchMatch = msg.match(/^(?:switch|load|show)\s+(?:chart\s+to\s+|to\s+)?([A-Za-z.-]+)$/i)
-  if (switchMatch) {
-    return { type: "switch", symbol: switchMatch[1]?.toUpperCase() }
-  }
-
-  // Mark levels patterns
-  const markMatch = msg.match(
-    /^(?:mark|draw)\s+(?:the\s+)?(?:(daily|weekly|monthly)\s+)?levels(?:\s+for\s+([A-Za-z.-]+))?$/i,
-  )
-  if (markMatch) {
-    return {
-      type: "mark",
-      symbol: markMatch[2]?.toUpperCase(),
-      timeframe: markMatch[1]?.toLowerCase() || "daily",
+  for (const pattern of pricePatterns) {
+    const match = msg.match(pattern)
+    if (match) {
+      const symbol = match[1]
+      return { type: "price", symbol: symbol?.toUpperCase() }
     }
   }
 
-  // Analyze patterns
-  const analyzeMatch = msg.match(
-    /^(?:analy[sz]e)(?:\s+current\s+chart)?(?:\s+([A-Za-z.-]+))?(?:\s+(daily|weekly|monthly))?$/i,
-  )
-  if (analyzeMatch) {
-    return {
-      type: "analyze",
-      symbol: analyzeMatch[1]?.toUpperCase(),
-      timeframe: analyzeMatch[2]?.toLowerCase() || "daily",
+  // Enhanced switch patterns
+  const switchPatterns = [
+    /(?:switch|load|show|change)\s+(?:chart\s+)?(?:to\s+)?([A-Za-z.\-\u0600-\u06FF]+)/i,
+    /(?:open|display)\s+([A-Za-z.\-\u0600-\u06FF]+)(?:\s+chart)?/i,
+  ]
+
+  for (const pattern of switchPatterns) {
+    const match = msg.match(pattern)
+    if (match) {
+      return { type: "switch", symbol: match[1]?.toUpperCase() }
+    }
+  }
+
+  // Enhanced mark levels patterns
+  const markPatterns = [
+    /(?:mark|draw|add)\s+(?:the\s+)?(?:(daily|weekly|monthly)\s+)?levels(?:\s+(?:for|on)\s+([A-Za-z.\-\u0600-\u06FF]+))?/i,
+    /(?:show|display)\s+(?:(daily|weekly|monthly)\s+)?(?:levels|lines)/i,
+  ]
+
+  for (const pattern of markPatterns) {
+    const match = msg.match(pattern)
+    if (match) {
+      return {
+        type: "mark",
+        symbol: match[2]?.toUpperCase(),
+        timeframe: match[1]?.toLowerCase() || "daily",
+      }
+    }
+  }
+
+  // Enhanced analyze patterns
+  const analyzePatterns = [
+    /(?:analy[sz]e)(?:\s+(?:current\s+)?chart)?(?:\s+([A-Za-z.\-\u0600-\u06FF]+))?(?:\s+(daily|weekly|monthly))?/i,
+    /(?:what\s+(?:do\s+you\s+)?think\s+about)\s+([A-Za-z.\-\u0600-\u06FF]+)/i,
+    /(?:technical\s+analysis)\s+(?:of\s+)?([A-Za-z.\-\u0600-\u06FF]+)/i,
+  ]
+
+  for (const pattern of analyzePatterns) {
+    const match = msg.match(pattern)
+    if (match) {
+      return {
+        type: "analyze",
+        symbol: match[1]?.toUpperCase(),
+        timeframe: match[2]?.toLowerCase() || "daily",
+      }
     }
   }
 
