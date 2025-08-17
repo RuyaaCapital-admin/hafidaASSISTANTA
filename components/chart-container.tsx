@@ -182,9 +182,9 @@ export function ChartContainer() {
     if (!chartRef.current?.chart) return
 
     const isDark = theme === "dark"
-    const backgroundColor = isDark ? "#0b0f1a" : "#ffffff"
-    const textColor = isDark ? "#E7EAF3" : "#111827"
-    const gridColor = isDark ? "rgba(231,234,243,0.1)" : "rgba(17,24,39,0.1)"
+    const backgroundColor = isDark ? "#0a0e1a" : "#fafafa"
+    const textColor = isDark ? "#f1f5f9" : "#0f172a"
+    const gridColor = isDark ? "rgba(241,245,249,0.08)" : "rgba(15,23,42,0.08)"
 
     chartRef.current.chart.applyOptions({
       layout: {
@@ -330,10 +330,10 @@ export function ChartContainer() {
         const containerHeight = Math.max(500, window.innerHeight * 0.7)
 
         const isDark = document.documentElement.classList.contains("dark")
-        const backgroundColor = isDark ? "#0b0f1a" : "#ffffff"
-        const textColor = isDark ? "#E7EAF3" : "#111827"
-        const gridColor = isDark ? "rgba(231,234,243,0.1)" : "rgba(17,24,39,0.1)"
-        const borderColor = isDark ? "#334155" : "#e2e8f0"
+        const backgroundColor = isDark ? "#0a0e1a" : "#fafafa"
+        const textColor = isDark ? "#f1f5f9" : "#0f172a"
+        const gridColor = isDark ? "rgba(241,245,249,0.08)" : "rgba(15,23,42,0.08)"
+        const borderColor = isDark ? "#1e293b" : "#e2e8f0"
 
         const chart = createChart(chartContainerRef.current!, {
           width: containerWidth,
