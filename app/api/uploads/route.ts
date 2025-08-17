@@ -1,12 +1,11 @@
 export const runtime = "nodejs"
 
 import { NextResponse } from "next/server"
-import { neon } from "@neondatabase/serverless"
-
-const sql = neon(process.env.DATABASE_URL!)
+import { getDb } from "@/lib/db"
 
 export async function GET() {
   try {
+    const sql = getDb()
     const uploads = await sql`
       SELECT id, blob_url, filename, filesize, mime, ingest_summary, created_at
       FROM uploads

@@ -1,10 +1,9 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { neon } from "@neondatabase/serverless"
-
-const sql = neon(process.env.DATABASE_URL!)
+import { getDb } from "@/lib/db"
 
 export async function POST(request: NextRequest) {
   try {
+    const sql = getDb()
     const body = await request.json()
     const { symbol, timeframe, asOfDate, method = "expected_move", upper1, lower1, upper2, lower2 } = body
 
