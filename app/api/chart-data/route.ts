@@ -18,6 +18,7 @@ const TIMEFRAME_MAP: Record<string, { type: "intraday" | "eod"; interval?: strin
   "1m": { type: "intraday", interval: "1m" },
   "5m": { type: "intraday", interval: "5m" },
   "15m": { type: "intraday", interval: "15m" },
+  "30m": { type: "intraday", interval: "30m" },
   "1h": { type: "intraday", interval: "60m" },
   "4h": { type: "intraday", interval: "240m" },
   daily: { type: "eod", period: "d" },
@@ -90,7 +91,14 @@ export async function GET(request: NextRequest) {
 
     const responseData = {
       success: true,
-      meta: { symbol, resolution },
+      meta: {
+        symbol,
+        resolution,
+        provider: "EODHD",
+        candles: chartData.length,
+        isRealTime: timeframeConfig.type === "intraday",
+        lastUpdate: new Date().toISOString()
+      },
       candles: chartData,
       last: lastPrice,
     }
