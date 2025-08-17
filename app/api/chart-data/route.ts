@@ -55,15 +55,8 @@ export async function GET(request: NextRequest) {
 
     const apiKey = process.env.EODHD_API_KEY
     if (!apiKey) {
-      console.error("[v0] EODHD_API_KEY missing - returning sample data")
-      // Return sample data instead of error for demo purposes
-      const sampleData = generateSampleData(symbol, resolution)
-      return NextResponse.json({
-        success: true,
-        meta: { symbol, resolution, isSample: true },
-        candles: sampleData,
-        last: sampleData[sampleData.length - 1]?.close,
-      })
+      console.error("[v0] EODHD_API_KEY missing")
+      return NextResponse.json({ success: false, error: "EODHD_API_KEY missing" }, { status: 500 })
     }
 
     const timeframeConfig = TIMEFRAME_MAP[resolution]
@@ -88,18 +81,7 @@ export async function GET(request: NextRequest) {
       }
     } catch (error) {
       console.error("[v0] Error fetching chart data:", error)
-      console.log("[v0] Falling back to sample data due to API error")
-
-      // Return sample data as fallback
-      const sampleData = generateSampleData(symbol, resolution)
-      const responseData = {
-        success: true,
-        meta: { symbol, resolution, isSample: true },
-        candles: sampleData,
-        last: sampleData[sampleData.length - 1]?.close,
-      }
-
-      return NextResponse.json(responseData)
+      return NextResponse.json({ success: false, error: "Failed to fetch chart data" }, { status: 500 })
     }
 
     if (chartData.length === 0) {
