@@ -82,7 +82,7 @@ export function ChartContainer() {
   const [isLoading, setIsLoading] = useState(false)
   const [lastLoadedSymbol, setLastLoadedSymbol] = useState<string>("")
   const [lastLoadedInterval, setLastLoadedInterval] = useState<string>("")
-  const loadingTimeoutRef = useRef<NodeJS.Timeout>()
+  const loadingTimeoutRef = useRef<NodeJS.Timeout | undefined>()
 
   useEffect(() => {
     if (typeof window !== "undefined") {
