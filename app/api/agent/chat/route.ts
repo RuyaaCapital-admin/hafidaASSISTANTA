@@ -112,7 +112,7 @@ Message: "${message}"`
       temperature: 0.1,
     })
 
-    const result = completion.choices[0]?.message?.content
+    const result = intentAnalysis.choices[0]?.message?.content
     if (result) {
       try {
         return JSON.parse(result)
