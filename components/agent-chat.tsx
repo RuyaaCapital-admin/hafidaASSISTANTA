@@ -133,9 +133,20 @@ export function AgentChat() {
       console.log("[v0] API response status:", response.status)
 
       if (!response.ok) {
-        const errorText = await response.text()
-        console.error("[v0] API error response:", errorText)
-        throw new Error(`HTTP error! status: ${response.status}`)
+        let errorData
+        try {
+          errorData = await response.json()
+        } catch {
+          const errorText = await response.text()
+          console.error("[v0] API error response:", errorText)
+          throw new Error(`HTTP error! status: ${response.status}`)
+        }
+        console.error("[v0] API error response:", errorData)
+        if (errorData.error) {
+          throw new Error(`${errorData.error.code}: ${errorData.error.message}`)
+        } else {
+          throw new Error(`HTTP error! status: ${response.status}`)
+        }
       }
 
       const result: AgentResponse = await response.json()
