@@ -21,14 +21,32 @@ interface AgentResponse {
 }
 
 export function AgentChat() {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: "1",
-      type: "assistant",
-      content: "Assistanta ready.",
-      timestamp: new Date(),
-    },
-  ])
+  const [messages, setMessages] = useState<Message[]>(() => {
+    // Load conversation history from localStorage
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("agent-chat-history")
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved)
+          return parsed.map((msg: any) => ({
+            ...msg,
+            timestamp: new Date(msg.timestamp)
+          }))
+        } catch {
+          // Fall through to default
+        }
+      }
+    }
+
+    return [
+      {
+        id: "1",
+        type: "assistant",
+        content: "I'm your trading assistant ready to help! 📈\n\nTry:\n• 'price BTC' or 'Bitcoin price'\n• 'switch to AAPL' \n• 'mark daily levels'\n• 'analyze current chart'\n\nI understand multiple languages and remember our conversation!",
+        timestamp: new Date(),
+      },
+    ]
+  })
   const [input, setInput] = useState("")
   const [file, setFile] = useState<File | null>(null)
   const [loading, setLoading] = useState(false)
