@@ -100,8 +100,9 @@ export async function GET(request: NextRequest) {
 
     console.log("[v0] Processed chart data:", chartData.length, "candles")
 
-    // Cache the response using new caching system
-    cacheUtils.cacheChartData(symbol, cacheKey, responseData)
+    // Cache the response with 5 minute TTL
+    const ttl = timeframeConfig.type === "intraday" ? 60000 : 300000 // 1 min for intraday, 5 min for daily
+    cache.set(cacheKey, { data: responseData, expires: Date.now() + ttl })
 
     return NextResponse.json(responseData)
   } catch (error) {
