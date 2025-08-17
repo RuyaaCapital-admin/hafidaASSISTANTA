@@ -11,10 +11,14 @@ interface MarkLevelsResult {
 
 export async function markLevels(symbol: string, timeframe: string): Promise<MarkLevelsResult> {
   try {
+    if (!symbol || !timeframe) {
+      throw new Error("Symbol and timeframe are required")
+    }
+
     // Fetch latest close price from EODHD
     const params = new URLSearchParams({
       symbol,
-      interval: timeframe === "weekly" ? "daily" : timeframe === "monthly" ? "daily" : timeframe,
+      resolution: timeframe === "weekly" ? "weekly" : timeframe === "monthly" ? "monthly" : timeframe,
     })
 
     // Get recent data for close price and volatility calculation

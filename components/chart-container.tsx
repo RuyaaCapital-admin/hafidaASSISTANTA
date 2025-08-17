@@ -761,6 +761,7 @@ export function ChartContainer() {
       }
 
       // Fallback to traditional calculation
+      console.log("[v0] Using traditional level calculation for", symbol, timeframe)
       const result = await markLevels(symbol, timeframe)
 
       if (result.success && result.levels) {
