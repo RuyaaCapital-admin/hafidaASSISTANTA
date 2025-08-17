@@ -48,11 +48,12 @@ export async function GET(request: NextRequest) {
 
     // Check cache first
     const cacheKey = `${symbol}-${resolution}-${from || 'default'}-${to || 'default'}`
-    const cached = cacheUtils.getCachedChartData(symbol, cacheKey)
+    const now = Date.now()
+    const cached = cache.get(cacheKey)
 
-    if (cached) {
+    if (cached && cached.expires > now) {
       console.log("[v0] Returning cached data for:", symbol)
-      return NextResponse.json(cached)
+      return NextResponse.json(cached.data)
     }
 
     const apiKey = process.env.EODHD_API_KEY
