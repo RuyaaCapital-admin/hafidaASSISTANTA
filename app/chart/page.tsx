@@ -18,7 +18,7 @@ const ChartContainer = dynamic(
   },
 )
 
-const AgentChat = dynamic(() => import("@/components/agent-chat").then((mod) => ({ default: mod.AgentChat })), {
+const Chat = dynamic(() => import("@/components/chat").then((mod) => ({ default: mod.Chat })), {
   ssr: false,
   loading: () => (
     <div className="flex items-center justify-center h-64 border rounded-lg">
@@ -38,7 +38,7 @@ export default function ChartPage() {
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 min-h-[calc(100vh-8rem)]">
           {/* Chart section - takes 2/3 on large screens */}
           <div key="chart-section" className="xl:col-span-2">
-            <ChartContainer key="main-chart" />
+            <ChartContainer key="main-chart" symbol="AAPL.US" />
           </div>
 
           {/* AI Chat section - takes 1/3 on large screens */}
@@ -49,7 +49,7 @@ export default function ChartPage() {
                 <p className="text-sm text-muted-foreground">Ask me to analyze charts or mark levels</p>
               </div>
               <div className="h-[600px]">
-                <AgentChat key="main-chat" />
+                <Chat key="main-chat" />
               </div>
             </div>
           </div>

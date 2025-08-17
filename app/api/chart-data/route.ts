@@ -56,10 +56,10 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(cached.data)
     }
 
-    const apiKey = process.env.EODHD_API_KEY
+    const apiKey = process.env.EODHD_API_TOKEN
     if (!apiKey) {
-      console.error("[v0] EODHD_API_KEY missing")
-      return NextResponse.json({ success: false, error: "EODHD_API_KEY missing" }, { status: 500 })
+      console.error("[v0] EODHD_API_TOKEN missing")
+      return NextResponse.json({ success: false, error: "EODHD_API_TOKEN missing" }, { status: 500 })
     }
 
     const timeframeConfig = TIMEFRAME_MAP[resolution]

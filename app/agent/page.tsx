@@ -1,5 +1,5 @@
 import { Navigation } from "@/components/navigation"
-import { AgentChat } from "@/components/agent-chat"
+import { Chat } from "@/components/chat"
 
 export default function AgentPage() {
   return (
@@ -11,7 +11,7 @@ export default function AgentPage() {
             <h1 className="text-3xl font-bold tracking-tight">AI Agent</h1>
             <p className="text-muted-foreground">Upload or paste weekly levels sheets for AI-powered analysis</p>
           </div>
-          <AgentChat />
+          <Chat />
         </div>
       </main>
     </div>

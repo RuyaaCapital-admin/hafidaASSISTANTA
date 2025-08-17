@@ -23,7 +23,7 @@ export async function markLevels(symbol: string, timeframe: string): Promise<Mar
     params.append("from", fromDate.toISOString().split("T")[0])
     params.append("to", new Date().toISOString().split("T")[0])
 
-    const response = await fetch(`/api/chart-data?${params}`)
+    const response = await fetch(`/api/eodhd?type=historical&${params}`)
     if (!response.ok) {
       throw new Error("Failed to fetch price data")
     }
