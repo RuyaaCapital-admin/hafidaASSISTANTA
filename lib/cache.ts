@@ -16,7 +16,7 @@ class DataCache {
     levels: 10 * 60 * 1000,   // 10 minutes for levels
     analysis: 2 * 60 * 1000,  // 2 minutes for analysis
     default: 5 * 60 * 1000    // 5 minutes default
-  }
+  } as const
 
   set<T>(key: string, data: T, category: keyof typeof this.defaultTTL = 'default'): void {
     // Clean up expired entries if cache is getting large
