@@ -36,9 +36,9 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Missing required parameter: symbol" }, { status: 400 })
     }
 
-    const apiKey = process.env.EODHD_API_KEY
+    const apiKey = process.env.EODHD_API_TOKEN
     if (!apiKey) {
-      return NextResponse.json({ error: "EODHD API key not configured" }, { status: 500 })
+      return NextResponse.json({ error: "EODHD API token not configured" }, { status: 500 })
     }
 
     // Check cache first

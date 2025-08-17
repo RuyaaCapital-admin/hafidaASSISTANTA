@@ -48,8 +48,11 @@ interface Snapshot {
   created_at: string
 }
 
-export function ChartContainer() {
-  const [symbol, setSymbol] = useState("AAPL.US")
+export function ChartContainer({ symbol: initialSymbol }: { symbol: string }) {
+  const [symbol, setSymbol] = useState(initialSymbol)
+  useEffect(() => {
+    setSymbol(initialSymbol)
+  }, [initialSymbol])
   const [date, setDate] = useState(new Date().toISOString().split("T")[0])
   const [interval, setInterval] = useState("daily")
   const [chartData, setChartData] = useState<ChartData[]>([])
@@ -238,7 +241,9 @@ export function ChartContainer() {
 
       try {
         console.log("[v0] Fetching data for:", newSymbol, newResolution)
-        const response = await fetch(`/api/chart-data?symbol=${newSymbol}&resolution=${newResolution}`)
+        const response = await fetch(
+          `/api/eodhd?type=historical&symbol=${newSymbol}&interval=${newResolution}`,
+        )
 
         if (!response.ok) {
           throw new Error(`Failed to fetch data: ${response.status}`)
@@ -282,22 +287,17 @@ export function ChartContainer() {
         if (controller.signal.aborted) return
 
         try {
-          const response = await fetch(`/api/chart-data?symbol=${symbol}&resolution=${resolution}`, {
+          const response = await fetch(`/api/eodhd?type=quote&symbol=${symbol}`, {
             signal: controller.signal,
           })
 
           if (!response.ok) throw new Error(`Poll failed: ${response.status}`)
 
           const data = await response.json()
-          if (data.candles && data.candles.length > 0 && chartRef.current?.candlestickSeries) {
-            // Update with incremental data
-            const lastCandle = data.candles[data.candles.length - 1]
-            chartRef.current.candlestickSeries.update(lastCandle)
-
-            if (data.last) {
-              setCurrentPrice(data.last)
-              setLastUpdated(new Date())
-            }
+          const price = data.close || data.price || data.last
+          if (price) {
+            setCurrentPrice(price)
+            setLastUpdated(new Date())
           }
         } catch (error) {
           if (!controller.signal.aborted) {
