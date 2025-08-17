@@ -18,7 +18,7 @@ const ChartContainer = dynamic(
   },
 )
 
-const Chat = dynamic(() => import("@/components/chat").then((mod) => ({ default: mod.Chat })), {
+const Chat = dynamic(() => import("@/components/agent-chat").then((mod) => ({ default: mod.AgentChat })), {
   ssr: false,
   loading: () => (
     <div className="flex items-center justify-center h-64 border rounded-lg">
