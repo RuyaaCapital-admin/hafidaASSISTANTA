@@ -205,6 +205,52 @@ export function AgentChat() {
     }
   }
 
+  const exportConversation = () => {
+    const exportData = {
+      timestamp: new Date().toISOString(),
+      messages: messages,
+      totalMessages: messages.length
+    }
+
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `trading-conversation-${new Date().toISOString().split('T')[0]}.json`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+
+    toast({
+      title: "Conversation exported",
+      description: "Downloaded as JSON file"
+    })
+  }
+
+  const clearConversation = () => {
+    const confirmClear = window.confirm("Are you sure you want to clear the conversation history?")
+    if (confirmClear) {
+      setMessages([
+        {
+          id: "1",
+          type: "assistant",
+          content: "I'm your trading assistant ready to help! 📈\n\nTry:\n• 'price BTC' or 'Bitcoin price'\n• 'switch to AAPL' \n• 'mark daily levels'\n• 'analyze current chart'\n\nI understand multiple languages and remember our conversation!",
+          timestamp: new Date(),
+        },
+      ])
+
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("agent-chat-history")
+      }
+
+      toast({
+        title: "Conversation cleared",
+        description: "Chat history has been reset"
+      })
+    }
+  }
+
   return (
     <div className="h-full flex flex-col">
       {status.active || status.text ? (
