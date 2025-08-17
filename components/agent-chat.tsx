@@ -68,6 +68,11 @@ export function AgentChat() {
 
   useEffect(() => {
     scrollToBottom()
+
+    // Save conversation history to localStorage
+    if (typeof window !== "undefined") {
+      localStorage.setItem("agent-chat-history", JSON.stringify(messages.slice(-50))) // Keep last 50 messages
+    }
   }, [messages])
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
