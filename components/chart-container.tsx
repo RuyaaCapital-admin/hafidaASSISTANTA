@@ -1134,8 +1134,8 @@ export function ChartContainer() {
           {/* Chart container with proper spacing for controls */}
           <div
             ref={chartContainerRef}
-            className="w-full h-[600px] pt-24" // Add top padding for controls
-            style={{ minHeight: "600px" }}
+            className="w-full h-[600px] pt-24" // Fixed height, top padding for controls
+            style={{ height: "600px", maxHeight: "600px", overflow: "hidden" }}
           />
 
           {/* Level values display - only when levels are visible */}
