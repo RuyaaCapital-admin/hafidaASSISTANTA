@@ -859,27 +859,26 @@ export function ChartContainer() {
   }, [interval, loadSeries, toast])
 
   return (
-    <div className="space-y-6">
-      <Card>
-        <CardContent className="pt-6">
+    <div className="space-y-4">
+      <Card className="border-0 shadow-sm">
+        <CardContent className="pt-4 pb-3">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-2xl font-bold">{displayName}</h2>
-              <p className="text-sm text-muted-foreground">
+              <h2 className="text-xl font-bold text-foreground">{displayName}</h2>
+              <p className="text-xs text-muted-foreground">
                 {chartData.length > 0 && (
                   <>
-                    Last: ${chartData[chartData.length - 1]?.close?.toFixed(2) || "N/A"} •{chartData.length} data points
-                    •{interval} interval
+                    Last: ${chartData[chartData.length - 1]?.close?.toFixed(2) || "N/A"} • {chartData.length} candles • {interval}
                   </>
                 )}
-                {loading && "Loading..."}
-                {error && "Using sample data"}
+                {loading && "Loading market data..."}
+                {error && "Connection error"}
               </p>
             </div>
             <div className="text-right">
-              <div className="text-sm text-muted-foreground">{new Date(date).toLocaleDateString()}</div>
+              <div className="text-xs text-muted-foreground">{new Date(date).toLocaleDateString()}</div>
               {chartData.length > 0 && (
-                <div className="text-lg font-semibold">
+                <div className="text-lg font-semibold text-foreground">
                   ${chartData[chartData.length - 1]?.close?.toFixed(2) || "N/A"}
                 </div>
               )}
@@ -888,54 +887,49 @@ export function ChartContainer() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center space-x-2">
-            <Search className="h-5 w-5" />
-            <span>Chart Controls</span>
+      <Card className="border-0 shadow-sm">
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center space-x-2 text-base">
+            <Search className="h-4 w-4" />
+            <span>Market Data Controls</span>
           </CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="flex flex-col sm:flex-row gap-4">
-            <div className="flex-1">
-              <Label htmlFor="symbol">Symbol</Label>
+        <CardContent className="pt-0">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+            <div className="md:col-span-2">
+              <Label htmlFor="symbol" className="text-xs font-medium">Symbol</Label>
               <div className="mt-1">
                 <SymbolSearch
                   onSymbolSelect={handleSymbolSelect}
-                  placeholder="Search symbols (e.g., AAPL, TSLA, NVDA)"
+                  placeholder="Search symbols (AAPL, BTC-USD.CC, EURUSD.FOREX)"
                 />
               </div>
               <div className="text-xs text-muted-foreground mt-1">Current: {symbol}</div>
             </div>
-            <div className="flex-1">
-              <Label htmlFor="interval">Interval</Label>
+            <div>
+              <Label htmlFor="interval" className="text-xs font-medium">Timeframe</Label>
               <Select value={interval} onValueChange={setInterval}>
-                <SelectTrigger className="mt-1">
+                <SelectTrigger className="mt-1 h-9">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="daily">Daily</SelectItem>
-                  <SelectItem value="weekly">Weekly</SelectItem>
-                  <SelectItem value="monthly">Monthly</SelectItem>
                   <SelectItem value="5m">5 Minutes</SelectItem>
                   <SelectItem value="15m">15 Minutes</SelectItem>
                   <SelectItem value="1h">1 Hour</SelectItem>
+                  <SelectItem value="daily">Daily</SelectItem>
+                  <SelectItem value="weekly">Weekly</SelectItem>
+                  <SelectItem value="monthly">Monthly</SelectItem>
                 </SelectContent>
               </Select>
-            </div>
-            <div className="flex-1">
-              <Label htmlFor="date">Date</Label>
-              <Input id="date" type="date" value={date} onChange={(e) => setDate(e.target.value)} className="mt-1" />
             </div>
             <div className="flex items-end">
               <Button
                 onClick={() => loadSeries(symbol, interval)}
                 disabled={isLoading}
-                variant="outline"
                 size="sm"
-                className="w-full sm:w-auto"
+                className="w-full h-9"
               >
-                {isLoading ? "Loading..." : "Refresh"}
+                {isLoading ? "Loading..." : "Update Chart"}
               </Button>
             </div>
           </div>
