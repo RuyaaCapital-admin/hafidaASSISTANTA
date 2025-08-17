@@ -18,7 +18,7 @@ class DataCache {
     default: 5 * 60 * 1000    // 5 minutes default
   } as const
 
-  set<T>(key: string, data: T, category: keyof typeof this.defaultTTL = 'default'): void {
+  set<T>(key: string, data: T, category: 'price' | 'chartData' | 'levels' | 'analysis' | 'default' = 'default'): void {
     // Clean up expired entries if cache is getting large
     if (this.cache.size >= this.maxSize) {
       this.cleanup()
