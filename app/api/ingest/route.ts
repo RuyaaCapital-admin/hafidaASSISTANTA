@@ -50,42 +50,70 @@ function parseIntent(message: string): {
 
   const msg = message.toLowerCase().trim()
 
-  // Price patterns - flexible order
-  const priceMatch = msg.match(
-    /(?:^price\s+([A-Za-z.-]+)|^([A-Za-z.-]+)\s+price$|^what'?s\s+([A-Za-z.-]+)\s+price$|^([A-Za-z.-]+)\s+now$)/i,
-  )
-  if (priceMatch) {
-    const symbol = priceMatch[1] || priceMatch[2] || priceMatch[3] || priceMatch[4]
-    return { type: "price", symbol: symbol?.toUpperCase() }
-  }
+  // Enhanced price patterns - more flexible
+  const pricePatterns = [
+    /(?:^price\s+([A-Za-z.\-\u0600-\u06FF]+))/i,
+    /(?:^([A-Za-z.\-\u0600-\u06FF]+)\s+price$)/i,
+    /(?:what'?s\s+([A-Za-z.\-\u0600-\u06FF]+)\s+(?:price|cost|value))/i,
+    /(?:^([A-Za-z.\-\u0600-\u06FF]+)\s+now$)/i,
+    /(?:how\s+much\s+(?:is\s+)?([A-Za-z.\-\u0600-\u06FF]+))/i,
+    /(?:current\s+price\s+(?:of\s+)?([A-Za-z.\-\u0600-\u06FF]+))/i,
+    /(?:^([A-Za-z.\-\u0600-\u06FF]+)\s+\$)/i,
+  ]
 
-  // Switch patterns
-  const switchMatch = msg.match(/^(?:switch|load|show)\s+(?:chart\s+to\s+|to\s+)?([A-Za-z.-]+)$/i)
-  if (switchMatch) {
-    return { type: "switch", symbol: switchMatch[1]?.toUpperCase() }
-  }
-
-  // Mark levels patterns
-  const markMatch = msg.match(
-    /^(?:mark|draw)\s+(?:the\s+)?(?:(daily|weekly|monthly)\s+)?levels(?:\s+for\s+([A-Za-z.-]+))?$/i,
-  )
-  if (markMatch) {
-    return {
-      type: "mark",
-      symbol: markMatch[2]?.toUpperCase(),
-      timeframe: markMatch[1]?.toLowerCase() || "daily",
+  for (const pattern of pricePatterns) {
+    const match = msg.match(pattern)
+    if (match) {
+      const symbol = match[1]
+      return { type: "price", symbol: symbol?.toUpperCase() }
     }
   }
 
-  // Analyze patterns
-  const analyzeMatch = msg.match(
-    /^(?:analy[sz]e)(?:\s+current\s+chart)?(?:\s+([A-Za-z.-]+))?(?:\s+(daily|weekly|monthly))?$/i,
-  )
-  if (analyzeMatch) {
-    return {
-      type: "analyze",
-      symbol: analyzeMatch[1]?.toUpperCase(),
-      timeframe: analyzeMatch[2]?.toLowerCase() || "daily",
+  // Enhanced switch patterns
+  const switchPatterns = [
+    /(?:switch|load|show|change)\s+(?:chart\s+)?(?:to\s+)?([A-Za-z.\-\u0600-\u06FF]+)/i,
+    /(?:open|display)\s+([A-Za-z.\-\u0600-\u06FF]+)(?:\s+chart)?/i,
+  ]
+
+  for (const pattern of switchPatterns) {
+    const match = msg.match(pattern)
+    if (match) {
+      return { type: "switch", symbol: match[1]?.toUpperCase() }
+    }
+  }
+
+  // Enhanced mark levels patterns
+  const markPatterns = [
+    /(?:mark|draw|add)\s+(?:the\s+)?(?:(daily|weekly|monthly)\s+)?levels(?:\s+(?:for|on)\s+([A-Za-z.\-\u0600-\u06FF]+))?/i,
+    /(?:show|display)\s+(?:(daily|weekly|monthly)\s+)?(?:levels|lines)/i,
+  ]
+
+  for (const pattern of markPatterns) {
+    const match = msg.match(pattern)
+    if (match) {
+      return {
+        type: "mark",
+        symbol: match[2]?.toUpperCase(),
+        timeframe: match[1]?.toLowerCase() || "daily",
+      }
+    }
+  }
+
+  // Enhanced analyze patterns
+  const analyzePatterns = [
+    /(?:analy[sz]e)(?:\s+(?:current\s+)?chart)?(?:\s+([A-Za-z.\-\u0600-\u06FF]+))?(?:\s+(daily|weekly|monthly))?/i,
+    /(?:what\s+(?:do\s+you\s+)?think\s+about)\s+([A-Za-z.\-\u0600-\u06FF]+)/i,
+    /(?:technical\s+analysis)\s+(?:of\s+)?([A-Za-z.\-\u0600-\u06FF]+)/i,
+  ]
+
+  for (const pattern of analyzePatterns) {
+    const match = msg.match(pattern)
+    if (match) {
+      return {
+        type: "analyze",
+        symbol: match[1]?.toUpperCase(),
+        timeframe: match[2]?.toLowerCase() || "daily",
+      }
     }
   }
 
@@ -230,10 +258,10 @@ async function analyze(symbol: string, timeframe = "daily") {
   }
 }
 
-async function generateChatResponse(message: string): Promise<string> {
+async function generateChatResponse(message: string, context?: any): Promise<string> {
   try {
     if (!message || typeof message !== "string") {
-      return "Assistanta ready."
+      return "I'm your trading assistant ready to help! Try commands like:\n• 'price BTC' or 'Bitcoin price'\n• 'switch to AAPL'\n• 'mark daily levels'\n• 'analyze current chart'"
     }
 
     const openai = createOpenAIClient()
@@ -241,32 +269,92 @@ async function generateChatResponse(message: string): Promise<string> {
       return "I'm having trouble connecting to the AI service. Please check that the OpenAI API key is properly configured."
     }
 
+    // Get current date and time
+    const now = new Date()
+    const dateStr = now.toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    })
+    const timeStr = now.toLocaleTimeString('en-US')
+
+    const systemPrompt = `You are Assistanta, an intelligent trading assistant. Here's what you need to know:
+
+📅 CURRENT CONTEXT:
+- Date: ${dateStr}
+- Time: ${timeStr}
+- Platform: Advanced Trading Interface with Real-time Data
+
+🎯 MY CAPABILITIES:
+- Real-time price data via API calls
+- Chart symbol switching and analysis
+- Technical level marking (daily/weekly/monthly)
+- Multi-language support (English, Arabic, others)
+- Conversation memory and context awareness
+
+💱 SYMBOL SUPPORT:
+- Stocks: AAPL, TSLA, NVDA, MSFT, AMZN, GOOGL, META, etc. (format: SYMBOL.US)
+- Crypto: BTC/Bitcoin/بيتكوين, ETH/Ethereum/إيثريوم, SOL, XRP, ADA, etc. (format: SYMBOL-USD.CC)
+- Forex: EURUSD, GBPUSD, USDJPY, XAUUSD/Gold, XAGUSD/Silver (format: PAIR.FOREX)
+
+⚡ SMART COMMANDS:
+- Price queries: "BTC price", "what's AAPL price", "Bitcoin now", "how much is Tesla"
+- Chart switching: "switch to AAPL", "show me Bitcoin", "open TSLA chart"
+- Level marking: "mark daily levels", "draw weekly lines", "add support resistance"
+- Analysis: "analyze current chart", "what do you think about BTC", "technical analysis NVDA"
+
+🔍 CORE PRINCIPLES:
+- NEVER make up or hallucinate price data, market information, or technical analysis
+- If I don't have real-time access to data, I'll suggest using specific commands
+- I remember our conversation and maintain context
+- I'm helpful but honest about my limitations
+- I suggest actionable next steps and proper commands
+
+💬 COMMUNICATION STYLE:
+- Professional but friendly and conversational
+- Concise responses (2-3 sentences typically)
+- Use relevant emojis sparingly for clarity
+- Acknowledge user's language preference
+- Focus on what I CAN do rather than limitations
+
+When users ask for data I can't directly access, I guide them to the right commands rather than apologizing repeatedly.`
+
+    // Build conversation history
+    const messages: any[] = [
+      {
+        role: "system",
+        content: systemPrompt,
+      }
+    ]
+
+    // Add conversation context if available
+    if (context && Array.isArray(context) && context.length > 0) {
+      messages.push(...context.slice(-4)) // Last 4 messages for context
+    }
+
+    // Add current message
+    messages.push({
+      role: "user",
+      content: message.trim(),
+    })
+
     const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      max_tokens: 300,
+      model: "gpt-3.5-turbo", // Most cost-effective model that still works well
+      max_tokens: 300, // Reduced to control costs
       temperature: 0.7,
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are Assistanta, a helpful trading assistant. Keep responses concise and friendly. Suggest specific commands like 'switch to AAPL', 'price TSLA', 'mark BTC levels', or 'analyze NVDA'.",
-        },
-        {
-          role: "user",
-          content: message.trim(),
-        },
-      ],
+      messages,
     })
 
     const aiResponse = response?.choices?.[0]?.message?.content
     if (!aiResponse || typeof aiResponse !== "string") {
-      return "Assistanta ready."
+      return "I'm ready to help with your trading analysis!"
     }
 
     return aiResponse
   } catch (error) {
     console.error("[v0] Error generating chat response:", error)
-    return "Assistanta ready."
+    return "I'm experiencing some technical difficulties. Please try again or use specific commands like 'price BTC' or 'switch to AAPL'."
   }
 }
 
@@ -275,6 +363,16 @@ export async function POST(request: NextRequest) {
     const formData = await request.formData()
     const file = formData.get("file") as File
     const message = formData.get("message") as string
+    const contextStr = formData.get("context") as string
+
+    let context = []
+    try {
+      if (contextStr) {
+        context = JSON.parse(contextStr)
+      }
+    } catch {
+      // Ignore context parsing errors
+    }
 
     if (!file && message) {
       const intent = parseIntent(message)
@@ -306,7 +404,7 @@ export async function POST(request: NextRequest) {
 
         case "chat":
         default:
-          const chatResponse = await generateChatResponse(message)
+          const chatResponse = await generateChatResponse(message, context)
           return NextResponse.json({ type: "chat", message: chatResponse })
       }
     }

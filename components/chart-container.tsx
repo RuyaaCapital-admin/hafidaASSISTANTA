@@ -82,7 +82,7 @@ export function ChartContainer() {
   const [isLoading, setIsLoading] = useState(false)
   const [lastLoadedSymbol, setLastLoadedSymbol] = useState<string>("")
   const [lastLoadedInterval, setLastLoadedInterval] = useState<string>("")
-  const loadingTimeoutRef = useRef<NodeJS.Timeout>()
+  const loadingTimeoutRef = useRef<NodeJS.Timeout | undefined>()
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -140,15 +140,15 @@ export function ChartContainer() {
 
   const getChartColors = (isDarkMode: boolean) => {
     return {
-      background: "transparent",
-      textColor: isDarkMode ? "#E7EAF3" : "#111827",
-      borderColor: isDarkMode ? "#334155" : "#e2e8f0",
+      background: isDarkMode ? "#020617" : "#ffffff",
+      textColor: isDarkMode ? "#f1f5f9" : "#111827",
+      borderColor: isDarkMode ? "#1e293b" : "#e2e8f0",
       upColor: "#22c55e",
       downColor: "#ef4444",
       daily: "#3B82F6", // light blue
       weekly: "#10B981", // green
       monthly: "#F59E0B", // orange
-      gridColor: isDarkMode ? "rgba(231,234,243,0.1)" : "rgba(17,24,39,0.1)",
+      gridColor: isDarkMode ? "rgba(241,245,249,0.08)" : "rgba(17,24,39,0.1)",
     }
   }
 
@@ -182,9 +182,9 @@ export function ChartContainer() {
     if (!chartRef.current?.chart) return
 
     const isDark = theme === "dark"
-    const backgroundColor = isDark ? "#0b0f1a" : "#ffffff"
-    const textColor = isDark ? "#E7EAF3" : "#111827"
-    const gridColor = isDark ? "rgba(231,234,243,0.1)" : "rgba(17,24,39,0.1)"
+    const backgroundColor = isDark ? "#020617" : "#ffffff" // Match chart initialization
+    const textColor = isDark ? "#f1f5f9" : "#111827"
+    const gridColor = isDark ? "rgba(241,245,249,0.08)" : "rgba(17,24,39,0.1)"
 
     chartRef.current.chart.applyOptions({
       layout: {
@@ -318,8 +318,18 @@ export function ChartContainer() {
   )
 
   const initializeChart = useCallback(() => {
-    if (typeof window === "undefined" || !chartContainerRef.current || chartRef.current) {
+    if (typeof window === "undefined" || !chartContainerRef.current) {
       return
+    }
+
+    // Clear any existing chart instance first
+    if (chartRef.current?.chart) {
+      try {
+        chartRef.current.chart.remove()
+        chartRef.current = null
+      } catch (error) {
+        console.warn("[v0] Error removing existing chart:", error)
+      }
     }
 
     import("lightweight-charts").then(({ createChart, CandlestickSeries, LineSeries }) => {
@@ -327,13 +337,13 @@ export function ChartContainer() {
         console.log("[v0] Initializing chart...")
 
         const containerWidth = chartContainerRef.current!.clientWidth || 800
-        const containerHeight = Math.max(500, window.innerHeight * 0.7)
+        const containerHeight = 600 // Fixed height to prevent expansion
 
         const isDark = document.documentElement.classList.contains("dark")
-        const backgroundColor = isDark ? "#0b0f1a" : "#ffffff"
-        const textColor = isDark ? "#E7EAF3" : "#111827"
-        const gridColor = isDark ? "rgba(231,234,243,0.1)" : "rgba(17,24,39,0.1)"
-        const borderColor = isDark ? "#334155" : "#e2e8f0"
+        const backgroundColor = isDark ? "#020617" : "#ffffff" // Much darker background
+        const textColor = isDark ? "#f1f5f9" : "#111827"
+        const gridColor = isDark ? "rgba(241,245,249,0.08)" : "rgba(17,24,39,0.1)"
+        const borderColor = isDark ? "#1e293b" : "#e2e8f0"
 
         const chart = createChart(chartContainerRef.current!, {
           width: containerWidth,
@@ -358,8 +368,6 @@ export function ChartContainer() {
             scaleMargins: { top: 0.1, bottom: 0.1 },
           },
           timeScale: {
-            borderColor: borderColor,
-            textColor: textColor,
             timeVisible: true,
             secondsVisible: false,
             borderVisible: false,
@@ -385,7 +393,7 @@ export function ChartContainer() {
         const handleResize = () => {
           if (chartRef.current?.chart && chartContainerRef.current) {
             const newWidth = chartContainerRef.current.clientWidth || 800
-            const newHeight = Math.max(500, window.innerHeight * 0.7)
+            const newHeight = 600 // Fixed height
             chartRef.current.chart.applyOptions({
               width: newWidth,
               height: newHeight,
@@ -406,13 +414,26 @@ export function ChartContainer() {
         console.error("[v0] Error initializing chart:", error)
       }
     })
-  }, [symbol, interval, loadSeries])
+  }, [])
 
   useEffect(() => {
-    if (!chartRef.current) {
+    // Initialize chart only once
+    if (!chartRef.current && chartContainerRef.current) {
       initializeChart()
     }
-  }, [initializeChart])
+
+    // Cleanup on unmount
+    return () => {
+      if (chartRef.current?.chart) {
+        try {
+          chartRef.current.chart.remove()
+          chartRef.current = null
+        } catch (error) {
+          console.warn("[v0] Error cleaning up chart:", error)
+        }
+      }
+    }
+  }, []) // Empty dependency array - only run once
 
   useEffect(() => {
     if (chartRef.current && (symbol !== lastLoadedSymbol || interval !== lastLoadedInterval)) {
@@ -1107,8 +1128,8 @@ export function ChartContainer() {
           {/* Chart container with proper spacing for controls */}
           <div
             ref={chartContainerRef}
-            className="w-full h-[600px] pt-24" // Add top padding for controls
-            style={{ minHeight: "600px" }}
+            className="w-full h-[600px] pt-24" // Fixed height, top padding for controls
+            style={{ height: "600px", maxHeight: "600px", overflow: "hidden" }}
           />
 
           {/* Level values display - only when levels are visible */}

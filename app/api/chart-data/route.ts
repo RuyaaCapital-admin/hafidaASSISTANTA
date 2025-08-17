@@ -3,6 +3,7 @@ export const runtime = "nodejs"
 import { type NextRequest, NextResponse } from "next/server"
 import { resolveSymbol } from "@/lib/symbols"
 
+// Simple cache implementation
 const cache = new Map<string, { data: any; expires: number }>()
 
 interface EODHDCandle {
@@ -45,11 +46,13 @@ export async function GET(request: NextRequest) {
     const symbol = resolved.provider
     console.log("[v0] Processing symbol:", symbolParam, "-> resolved:", symbol)
 
-    const cacheKey = `${symbol}-${resolution}-${from}-${to}`
+    // Check cache first
+    const cacheKey = `${symbol}-${resolution}-${from || 'default'}-${to || 'default'}`
     const now = Date.now()
     const cached = cache.get(cacheKey)
 
     if (cached && cached.expires > now) {
+      console.log("[v0] Returning cached data for:", symbol)
       return NextResponse.json(cached.data)
     }
 
@@ -97,8 +100,9 @@ export async function GET(request: NextRequest) {
 
     console.log("[v0] Processed chart data:", chartData.length, "candles")
 
-    const ttl = timeframeConfig.type === "intraday" ? 15000 : 60000
-    cache.set(cacheKey, { data: responseData, expires: now + ttl })
+    // Cache the response with 5 minute TTL
+    const ttl = timeframeConfig.type === "intraday" ? 60000 : 300000 // 1 min for intraday, 5 min for daily
+    cache.set(cacheKey, { data: responseData, expires: Date.now() + ttl })
 
     return NextResponse.json(responseData)
   } catch (error) {

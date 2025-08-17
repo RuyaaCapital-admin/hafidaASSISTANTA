@@ -37,19 +37,19 @@ export default function ChartPage() {
       <main className="container mx-auto p-4">
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 min-h-[calc(100vh-8rem)]">
           {/* Chart section - takes 2/3 on large screens */}
-          <div className="xl:col-span-2">
-            <ChartContainer />
+          <div key="chart-section" className="xl:col-span-2">
+            <ChartContainer key="main-chart" />
           </div>
 
           {/* AI Chat section - takes 1/3 on large screens */}
-          <div className="xl:col-span-1">
+          <div key="chat-section" className="xl:col-span-1">
             <div className="border rounded-lg bg-card">
               <div className="p-4 border-b">
                 <h2 className="text-lg font-semibold">AI Assistant</h2>
                 <p className="text-sm text-muted-foreground">Ask me to analyze charts or mark levels</p>
               </div>
               <div className="h-[600px]">
-                <AgentChat />
+                <AgentChat key="main-chat" />
               </div>
             </div>
           </div>

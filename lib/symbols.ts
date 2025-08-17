@@ -21,7 +21,43 @@ export function resolveSymbol(input: string): ResolvedSymbol | SymbolError {
     return { user: input, provider: cleaned, assetClass }
   }
 
-  // Crypto mapping (USD pairs)
+  // Multi-language crypto name mapping
+  const cryptoNameMap: Record<string, string> = {
+    // English names
+    "BITCOIN": "BTC",
+    "ETHEREUM": "ETH",
+    "SOLANA": "SOL",
+    "RIPPLE": "XRP",
+    "CARDANO": "ADA",
+    "POLKADOT": "DOT",
+    "CHAINLINK": "LINK",
+    "AVALANCHE": "AVAX",
+    "POLYGON": "MATIC",
+    "UNISWAP": "UNI",
+    "DOGECOIN": "DOGE",
+    "LITECOIN": "LTC",
+    "BINANCE": "BNB",
+    "BINANCECOIN": "BNB",
+
+    // Arabic names (common crypto terms)
+    "بيتكوين": "BTC",
+    "إيثريوم": "ETH",
+    "ريبل": "XRP",
+    "لايتكوين": "LTC",
+    "دوجكوين": "DOGE",
+
+    // Alternative spellings
+    "ETHERIUM": "ETH", // common misspelling
+    "ETHERUM": "ETH",
+  }
+
+  // Check for crypto name variations first
+  if (cryptoNameMap[cleaned]) {
+    const symbol = cryptoNameMap[cleaned]
+    return { user: input, provider: `${symbol}-USD.CC`, assetClass: "crypto" }
+  }
+
+  // Crypto mapping (USD pairs) - expanded list
   const cryptoMap: Record<string, string> = {
     BTC: "BTC-USD.CC",
     ETH: "ETH-USD.CC",
@@ -33,6 +69,16 @@ export function resolveSymbol(input: string): ResolvedSymbol | SymbolError {
     AVAX: "AVAX-USD.CC",
     MATIC: "MATIC-USD.CC",
     UNI: "UNI-USD.CC",
+    DOGE: "DOGE-USD.CC",
+    LTC: "LTC-USD.CC",
+    BNB: "BNB-USD.CC",
+    AXS: "AXS-USD.CC",
+    SAND: "SAND-USD.CC",
+    MANA: "MANA-USD.CC",
+    ALGO: "ALGO-USD.CC",
+    ATOM: "ATOM-USD.CC",
+    NEAR: "NEAR-USD.CC",
+    FTM: "FTM-USD.CC",
   }
 
   if (cryptoMap[cleaned]) {
@@ -43,12 +89,17 @@ export function resolveSymbol(input: string): ResolvedSymbol | SymbolError {
   const forexMap: Record<string, string> = {
     XAU: "XAUUSD.FOREX",
     XAG: "XAGUSD.FOREX",
+    GOLD: "XAUUSD.FOREX",
+    SILVER: "XAGUSD.FOREX",
     EURUSD: "EURUSD.FOREX",
     GBPUSD: "GBPUSD.FOREX",
     USDJPY: "USDJPY.FOREX",
     USDCHF: "USDCHF.FOREX",
     AUDUSD: "AUDUSD.FOREX",
     USDCAD: "USDCAD.FOREX",
+    NZDUSD: "NZDUSD.FOREX",
+    EURGBP: "EURGBP.FOREX",
+    EURJPY: "EURJPY.FOREX",
   }
 
   if (forexMap[cleaned]) {

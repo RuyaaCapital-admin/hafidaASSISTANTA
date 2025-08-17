@@ -4,7 +4,7 @@ import type React from "react"
 import { useState, useRef, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Upload, Send, ImageIcon, FileText, Loader2, Activity } from "lucide-react"
+import { Upload, Send, ImageIcon, FileText, Loader2, Activity, Download, Trash2 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
 interface Message {
@@ -21,14 +21,32 @@ interface AgentResponse {
 }
 
 export function AgentChat() {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: "1",
-      type: "assistant",
-      content: "Assistanta ready.",
-      timestamp: new Date(),
-    },
-  ])
+  const [messages, setMessages] = useState<Message[]>(() => {
+    // Load conversation history from localStorage
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("agent-chat-history")
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved)
+          return parsed.map((msg: any) => ({
+            ...msg,
+            timestamp: new Date(msg.timestamp)
+          }))
+        } catch {
+          // Fall through to default
+        }
+      }
+    }
+
+    return [
+      {
+        id: "1",
+        type: "assistant",
+        content: "I'm your trading assistant ready to help! 📈\n\nTry:\n• 'price BTC' or 'Bitcoin price'\n• 'switch to AAPL' \n• 'mark daily levels'\n• 'analyze current chart'\n\nI understand multiple languages and remember our conversation!",
+        timestamp: new Date(),
+      },
+    ]
+  })
   const [input, setInput] = useState("")
   const [file, setFile] = useState<File | null>(null)
   const [loading, setLoading] = useState(false)
@@ -50,6 +68,11 @@ export function AgentChat() {
 
   useEffect(() => {
     scrollToBottom()
+
+    // Save conversation history to localStorage
+    if (typeof window !== "undefined") {
+      localStorage.setItem("agent-chat-history", JSON.stringify(messages.slice(-50))) // Keep last 50 messages
+    }
   }, [messages])
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -94,6 +117,12 @@ export function AgentChat() {
       }
       if (input.trim()) {
         formData.append("message", input)
+        // Pass recent conversation context
+        const recentMessages = messages.slice(-5).map(msg => ({
+          role: msg.type === "user" ? "user" : "assistant",
+          content: msg.content
+        }))
+        formData.append("context", JSON.stringify(recentMessages))
       }
 
       const response = await fetch("/api/ingest", {
@@ -176,18 +205,94 @@ export function AgentChat() {
     }
   }
 
+  const exportConversation = () => {
+    const exportData = {
+      timestamp: new Date().toISOString(),
+      messages: messages,
+      totalMessages: messages.length
+    }
+
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `trading-conversation-${new Date().toISOString().split('T')[0]}.json`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+
+    toast({
+      title: "Conversation exported",
+      description: "Downloaded as JSON file"
+    })
+  }
+
+  const clearConversation = () => {
+    const confirmClear = window.confirm("Are you sure you want to clear the conversation history?")
+    if (confirmClear) {
+      setMessages([
+        {
+          id: "1",
+          type: "assistant",
+          content: "I'm your trading assistant ready to help! 📈\n\nTry:\n• 'price BTC' or 'Bitcoin price'\n• 'switch to AAPL' \n• 'mark daily levels'\n• 'analyze current chart'\n\nI understand multiple languages and remember our conversation!",
+          timestamp: new Date(),
+        },
+      ])
+
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("agent-chat-history")
+      }
+
+      toast({
+        title: "Conversation cleared",
+        description: "Chat history has been reset"
+      })
+    }
+  }
+
   return (
     <div className="h-full flex flex-col">
-      {status.active || status.text ? (
-        <div
-          className={`px-4 py-2 border-b flex items-center gap-2 text-xs ${
-            status.error ? "bg-red-50 text-red-700 border-red-200" : "bg-green-50 text-green-700 border-green-200"
-          }`}
-        >
-          <Activity className={`h-3 w-3 ${status.active ? "animate-pulse" : ""}`} />
-          <span>{status.text}</span>
+      {/* Status bar with controls */}
+      <div className="px-4 py-2 border-b">
+        <div className="flex items-center justify-between">
+          {status.active || status.text ? (
+            <div
+              className={`flex items-center gap-2 text-xs ${
+                status.error ? "text-red-700" : "text-green-700"
+              }`}
+            >
+              <Activity className={`h-3 w-3 ${status.active ? "animate-pulse" : ""}`} />
+              <span>{status.text}</span>
+            </div>
+          ) : (
+            <div className="text-xs text-muted-foreground">
+              {messages.length - 1} messages
+            </div>
+          )}
+
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={exportConversation}
+              className="h-6 px-2 text-xs"
+              title="Export conversation"
+            >
+              <Download className="h-3 w-3" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={clearConversation}
+              className="h-6 px-2 text-xs text-red-600 hover:text-red-700"
+              title="Clear conversation"
+            >
+              <Trash2 className="h-3 w-3" />
+            </Button>
+          </div>
         </div>
-      ) : null}
+      </div>
 
       <div
         ref={messagesContainerRef}
