@@ -2,7 +2,9 @@ export const runtime = "nodejs"
 
 import { type NextRequest, NextResponse } from "next/server"
 import { resolveSymbol } from "@/lib/symbols"
-import { cacheUtils } from "@/lib/cache"
+
+// Simple cache implementation
+const cache = new Map<string, { data: any; expires: number }>()
 
 interface EODHDCandle {
   date: string
