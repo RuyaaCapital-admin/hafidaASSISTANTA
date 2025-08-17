@@ -182,9 +182,9 @@ export function ChartContainer() {
     if (!chartRef.current?.chart) return
 
     const isDark = theme === "dark"
-    const backgroundColor = isDark ? "#0b0f1a" : "#ffffff"
-    const textColor = isDark ? "#E7EAF3" : "#111827"
-    const gridColor = isDark ? "rgba(231,234,243,0.1)" : "rgba(17,24,39,0.1)"
+    const backgroundColor = isDark ? "#020617" : "#ffffff" // Match chart initialization
+    const textColor = isDark ? "#f1f5f9" : "#111827"
+    const gridColor = isDark ? "rgba(241,245,249,0.08)" : "rgba(17,24,39,0.1)"
 
     chartRef.current.chart.applyOptions({
       layout: {
