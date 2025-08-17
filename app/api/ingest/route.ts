@@ -340,8 +340,8 @@ When users ask for data I can't directly access, I guide them to the right comma
     })
 
     const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      max_tokens: 400,
+      model: "gpt-3.5-turbo", // Most cost-effective model that still works well
+      max_tokens: 300, // Reduced to control costs
       temperature: 0.7,
       messages,
     })
