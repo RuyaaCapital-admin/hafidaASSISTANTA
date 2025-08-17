@@ -245,7 +245,7 @@ export function ChartContainer() {
         }
 
         const data = await response.json()
-        console.log("[v0] Received data:", data?.candles?.length || 0, "candles")
+        console.log("[v0] Received data:", data?.candles?.length || 0, "candles", data?.meta?.isSample ? "(sample data)" : "(live data)")
 
         if (data && data.candles && Array.isArray(data.candles) && data.candles.length > 0) {
           console.log("[v0] Setting chart data:", data.candles.length, "candles")
@@ -254,6 +254,14 @@ export function ChartContainer() {
           // Update current price if available
           if (data.last) {
             setCurrentPrice(data.last)
+          }
+
+          // Show message if using sample data
+          if (data.meta?.isSample) {
+            toast({
+              title: "Using Sample Data",
+              description: "Add your EODHD API key to .env.local for live market data",
+            })
           }
 
           // Auto-fit content after data load
