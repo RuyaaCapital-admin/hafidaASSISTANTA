@@ -419,10 +419,27 @@ export function ChartContainer() {
   }, [])
 
   useEffect(() => {
-    if (!chartRef.current) {
-      initializeChart()
+    const initChart = () => {
+      if (!chartRef.current) {
+        initializeChart()
+      }
     }
-  }, [initializeChart])
+
+    // Only initialize once
+    initChart()
+
+    // Cleanup on unmount
+    return () => {
+      if (chartRef.current?.chart) {
+        try {
+          chartRef.current.chart.remove()
+          chartRef.current = null
+        } catch (error) {
+          console.warn("[v0] Error cleaning up chart:", error)
+        }
+      }
+    }
+  }, [])
 
   useEffect(() => {
     if (chartRef.current && (symbol !== lastLoadedSymbol || interval !== lastLoadedInterval)) {
