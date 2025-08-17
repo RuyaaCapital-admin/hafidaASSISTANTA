@@ -368,8 +368,6 @@ export function ChartContainer() {
             scaleMargins: { top: 0.1, bottom: 0.1 },
           },
           timeScale: {
-            borderColor: borderColor,
-            textColor: textColor,
             timeVisible: true,
             secondsVisible: false,
             borderVisible: false,
