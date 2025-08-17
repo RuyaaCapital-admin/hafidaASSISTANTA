@@ -395,7 +395,7 @@ export function ChartContainer() {
         const handleResize = () => {
           if (chartRef.current?.chart && chartContainerRef.current) {
             const newWidth = chartContainerRef.current.clientWidth || 800
-            const newHeight = Math.max(500, 600)
+            const newHeight = 600 // Fixed height
             chartRef.current.chart.applyOptions({
               width: newWidth,
               height: newHeight,
