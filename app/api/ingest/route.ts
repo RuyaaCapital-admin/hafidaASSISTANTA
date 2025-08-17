@@ -312,6 +312,16 @@ export async function POST(request: NextRequest) {
     const formData = await request.formData()
     const file = formData.get("file") as File
     const message = formData.get("message") as string
+    const contextStr = formData.get("context") as string
+
+    let context = []
+    try {
+      if (contextStr) {
+        context = JSON.parse(contextStr)
+      }
+    } catch {
+      // Ignore context parsing errors
+    }
 
     if (!file && message) {
       const intent = parseIntent(message)
@@ -343,7 +353,7 @@ export async function POST(request: NextRequest) {
 
         case "chat":
         default:
-          const chatResponse = await generateChatResponse(message)
+          const chatResponse = await generateChatResponse(message, context)
           return NextResponse.json({ type: "chat", message: chatResponse })
       }
     }
