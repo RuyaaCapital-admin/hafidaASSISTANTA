@@ -140,15 +140,15 @@ export function ChartContainer() {
 
   const getChartColors = (isDarkMode: boolean) => {
     return {
-      background: "transparent",
-      textColor: isDarkMode ? "#E7EAF3" : "#111827",
-      borderColor: isDarkMode ? "#334155" : "#e2e8f0",
+      background: isDarkMode ? "#020617" : "#ffffff",
+      textColor: isDarkMode ? "#f1f5f9" : "#111827",
+      borderColor: isDarkMode ? "#1e293b" : "#e2e8f0",
       upColor: "#22c55e",
       downColor: "#ef4444",
       daily: "#3B82F6", // light blue
       weekly: "#10B981", // green
       monthly: "#F59E0B", // orange
-      gridColor: isDarkMode ? "rgba(231,234,243,0.1)" : "rgba(17,24,39,0.1)",
+      gridColor: isDarkMode ? "rgba(241,245,249,0.08)" : "rgba(17,24,39,0.1)",
     }
   }
 
