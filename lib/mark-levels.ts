@@ -28,12 +28,18 @@ export async function markLevels(symbol: string, timeframe: string): Promise<Mar
       throw new Error("Failed to fetch price data")
     }
 
-    const data = await response.json()
-    if (!data || data.length === 0) {
+    const responseData = await response.json()
+    if (!responseData || !responseData.success || !responseData.candles || responseData.candles.length === 0) {
       throw new Error("No price data available")
     }
 
+    const data = responseData.candles
     const latestCandle = data[data.length - 1]
+
+    if (!latestCandle || typeof latestCandle.close === 'undefined') {
+      throw new Error("Invalid candle data - missing close price")
+    }
+
     const close = latestCandle.close
 
     // Calculate time factor based on timeframe
@@ -64,13 +70,17 @@ export async function markLevels(symbol: string, timeframe: string): Promise<Mar
     if (data.length >= 20) {
       const returns = []
       for (let i = 1; i < Math.min(data.length, 21); i++) {
-        const dailyReturn = Math.log(data[i].close / data[i - 1].close)
-        returns.push(dailyReturn)
+        if (data[i] && data[i - 1] && data[i].close && data[i - 1].close) {
+          const dailyReturn = Math.log(data[i].close / data[i - 1].close)
+          returns.push(dailyReturn)
+        }
       }
 
-      const mean = returns.reduce((sum, r) => sum + r, 0) / returns.length
-      const variance = returns.reduce((sum, r) => sum + Math.pow(r - mean, 2), 0) / returns.length
-      IV = Math.sqrt(variance * 252) // Annualized volatility
+      if (returns.length > 0) {
+        const mean = returns.reduce((sum, r) => sum + r, 0) / returns.length
+        const variance = returns.reduce((sum, r) => sum + Math.pow(r - mean, 2), 0) / returns.length
+        IV = Math.sqrt(variance * 252) // Annualized volatility
+      }
     }
 
     // Calculate Expected Move: EM = Close × IV × sqrt(T/252)
